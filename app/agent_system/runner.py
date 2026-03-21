@@ -55,7 +55,7 @@ def _make_agent() -> CodeAgent:
         max_steps=manager_agent.max_steps,
         additional_authorized_imports=manager_agent.authorized_imports,
         verbosity_level=manager_agent.logger.level,
-        # instructions=_INSTRUCTIONS,
+        instructions=_INSTRUCTIONS,
     )
 
     # Attach per-request routing state (set before each run, cleared after).

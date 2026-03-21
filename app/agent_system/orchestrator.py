@@ -67,5 +67,5 @@ manager_agent = CodeAgent(
     max_steps=2,  # plan(1) + delegate to sub-agents(2-3) + final answer(1)
     additional_authorized_imports=["time", "datetime", "PIL"],
     verbosity_level=1,
-    # instructions=_INSTRUCTIONS,
+    instructions=_INSTRUCTIONS,
 )
