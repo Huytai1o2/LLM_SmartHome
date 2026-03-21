@@ -16,7 +16,7 @@ from app.repositories.session_repo import (
     get_or_create_session,
     get_session,
 )
-from app.agent.runner import stream_response
+from app.multiple_agentic_system.runner import clear_session, stream_response
 
 router = APIRouter(prefix="/api/v1")
 
@@ -98,7 +98,9 @@ async def chat_stream(body: ChatRequest):
 
                 # 4. Stream the agent and emit delta events
                 reply_chunks: list[str] = []
-                async for chunk in stream_response(body.message, history):
+                async for chunk in stream_response(
+                    body.message, history, body.session_id
+                ):
                     reply_chunks.append(chunk)
                     await queue.put(_delta_event(chunk))
 
@@ -202,3 +204,6 @@ async def delete_session_endpoint(
 
     if not deleted:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    # Remove the session's cached agent from memory
+    clear_session(str(session_id))
