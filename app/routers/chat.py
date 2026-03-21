@@ -16,7 +16,7 @@ from app.repositories.session_repo import (
     get_or_create_session,
     get_session,
 )
-from app.multiple_agentic_system.runner import clear_session, stream_response
+from app.agent_system.runner import clear_session, stream_response
 
 router = APIRouter(prefix="/api/v1")
 

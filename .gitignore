@@ -45,3 +45,9 @@ Thumbs.db
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Vector store
+faiss_index/
+
+# knowledge base files
+knowledge_base/files/

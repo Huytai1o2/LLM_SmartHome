@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Generated data (large — mount as volumes instead)
+faiss_index/
+knowledge_base/files/
+
+# Dev / editor
+.git/
+.gitignore
+.env
+.env.*
+.vscode/
+.idea/
+
+# Docs
+docs/
+
+# Test
+test/
+
+# Misc
+*.log
+*.DS_Store

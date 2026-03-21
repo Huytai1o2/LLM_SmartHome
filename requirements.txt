@@ -21,7 +21,9 @@ gradio-tools>=0.0.9
 langchain>=1.2.12
 langchain-community>=0.4.1
 langchain-huggingface>=1.2.1
+sentence-transformers>=3.0.0
 faiss-cpu>=1.13.2
+transformers<5.0.0
 
 # Testing
 pytest>=8.0.0

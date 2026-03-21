@@ -38,9 +38,7 @@ from threading import Thread
 from smolagents import CodeAgent
 from smolagents.memory import ActionStep
 
-from app.multiple_agentic_system.model import model
-from app.multiple_agentic_system.agents.web_agent import web_agent
-from app.multiple_agentic_system.agents.retriever_agent import retriever_agent
+from app.agent_system.orchestrator import manager_agent, _INSTRUCTIONS
 
 logger = logging.getLogger(__name__)
 
@@ -49,12 +47,15 @@ _SESSION_AGENTS: dict[str, CodeAgent] = {}
 
 
 def _make_agent() -> CodeAgent:
-    """Create a fresh CodeAgent with the same config as the global orchestrator."""
+    """Create a fresh per-session CodeAgent mirroring the manager_agent config."""
     agent = CodeAgent(
-        tools=[],
-        model=model,
-        managed_agents=[web_agent, retriever_agent],
-        additional_authorized_imports=["time", "datetime", "PIL"],
+        tools=list(manager_agent.tools.values()),
+        model=manager_agent.model,
+        managed_agents=list(manager_agent.managed_agents.values()),
+        max_steps=manager_agent.max_steps,
+        additional_authorized_imports=manager_agent.authorized_imports,
+        verbosity_level=manager_agent.logger.level,
+        # instructions=_INSTRUCTIONS,
     )
 
     # Attach per-request routing state (set before each run, cleared after).

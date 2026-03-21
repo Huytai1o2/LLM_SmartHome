@@ -7,12 +7,14 @@ Equipped with:
 """
 
 from smolagents import ToolCallingAgent
-from app.multiple_agentic_system.model import model
-from app.multiple_agentic_system.tools.web_tools import search_tool, visit_webpage_tool
+from app.agent_system.model import model
+from app.agent_system.tools.web_tools import search_tool
 
 web_agent = ToolCallingAgent(
-    tools=[search_tool, visit_webpage_tool],
+    tools=[search_tool],  # VisitWebpageTool removed — page fetching adds 2-5s per call
     model=model,
+    max_steps=2,  # search once, summarise once
+    verbosity_level=1,
     name="search_agent",
     description="Runs web searches for you. Give it your query as an argument.",
 )
