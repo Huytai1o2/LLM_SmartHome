@@ -1,4 +1,4 @@
-# Multi-Agent Research Supervisor (MARS)
+# Multi-Agent System Base (MASB)
 
 A FastAPI application that orchestrates a **multi-agent AI system** to answer user questions using a combination of live web search and a FAISS-backed retrieval-augmented generation (RAG) knowledge base. All agents are powered by a local or cloud LLM via [smolagents](https://github.com/huggingface/smolagents).
 
