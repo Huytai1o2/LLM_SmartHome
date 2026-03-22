@@ -26,9 +26,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Multi Agent Research Supervisor Assistance",
+    title="Multi-Agent AI Assistant",
     version="1.0.0",
-    description="A FastAPI application that provides assistance for multi-agent research supervision tasks, leveraging LLM's capabilities to enhance productivity and efficiency in research management.",
+    description="A FastAPI application powered by a multi-agent AI system using Ollama LLMs, RAG with FAISS vector search, real-time streaming via SSE, and persistent chat history backed by PostgreSQL.",
     lifespan=lifespan,
 )
 

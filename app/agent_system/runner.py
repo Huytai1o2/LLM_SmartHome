@@ -22,9 +22,23 @@ per-session agent cache (_SESSION_AGENTS). Each session owns its own CodeAgent
 instance so their memories never bleed into one another.
 
 --- Streaming strategy ---
-1. A step callback pushes each step's observations to the queue for live UX.
-2. Once the agent finishes, the final answer is the last yielded chunk.
-3. A sentinel None signals the generator to stop.
+agent.run(stream=True) returns a generator that yields multiple object types
+as execution progresses.  We handle each type differently:
+
+  ChatMessageStreamDelta  – individual LLM tokens yielded *during* generation.
+                            Pushing these gives real-time token-by-token output
+                            so the user sees text appearing immediately instead
+                            of waiting for the full step to finish.
+
+  FinalAnswerStep         – yielded once at the very end; its `.output` is the
+                            clean final answer string.  We use this to confirm
+                            we have a final answer and send it if no tokens were
+                            streamed (e.g. when stream_outputs is not supported).
+
+  ActionStep / others     – skipped; their content already arrived via deltas
+                            above, and re-sending observations causes duplicates.
+
+A sentinel None signals the async generator to stop.
 """
 
 from __future__ import annotations
@@ -36,7 +50,8 @@ from collections.abc import AsyncGenerator
 from threading import Thread
 
 from smolagents import CodeAgent
-from smolagents.memory import ActionStep
+from smolagents.models import ChatMessageStreamDelta
+from smolagents.memory import FinalAnswerStep
 
 from app.agent_system.orchestrator import manager_agent, _INSTRUCTIONS
 
@@ -56,23 +71,8 @@ def _make_agent() -> CodeAgent:
         additional_authorized_imports=manager_agent.authorized_imports,
         verbosity_level=manager_agent.logger.level,
         instructions=_INSTRUCTIONS,
+        stream_outputs=True,  # stream code-execution print outputs
     )
-
-    # Attach per-request routing state (set before each run, cleared after).
-    agent._current_queue: asyncio.Queue | None = None
-    agent._current_loop: asyncio.AbstractEventLoop | None = None
-
-    # Register a single persistent callback using the CallbackRegistry API.
-    def _dispatch(step_log: ActionStep) -> None:
-        q = agent._current_queue
-        lp = agent._current_loop
-        if q is None or lp is None:
-            return
-        obs = getattr(step_log, "observations", None)
-        if obs and isinstance(obs, str) and obs.strip():
-            lp.call_soon_threadsafe(q.put_nowait, obs.strip() + "\n")
-
-    agent.step_callbacks.register(ActionStep, _dispatch)
     return agent
 
 
@@ -125,23 +125,40 @@ async def stream_response(
     queue: asyncio.Queue[str | None] = asyncio.Queue()
 
     # ------------------------------------------------------------------
-    # Background thread: run the synchronous CodeAgent.run().
-    # The persistent callback registered in _make_agent() routes
-    # observations to agent._current_queue / agent._current_loop.
+    # Background thread: run the synchronous CodeAgent.run(stream=True).
+    # The generator yields mixed types as each step executes:
+    #   ChatMessageStreamDelta – push .content immediately (real-time tokens)
+    #   FinalAnswerStep        – push .output as fallback / confirmation
+    #   Everything else        – skip (ActionStep, PlanningStep, ToolCall ...)
     # ------------------------------------------------------------------
     def _run() -> None:
-        agent._current_queue = queue
-        agent._current_loop = loop
         try:
-            # Official pattern: reset=False preserves agent.memory.steps
-            result = agent.run(message, reset=reset)
-            loop.call_soon_threadsafe(queue.put_nowait, str(result))
+            streamed_any_delta = False
+            final_answer: str | None = None
+
+            for item in agent.run(message, stream=True, reset=reset):
+                # 1. Real-time LLM token streaming
+                if isinstance(item, ChatMessageStreamDelta):
+                    if item.content:
+                        loop.call_soon_threadsafe(queue.put_nowait, item.content)
+                        streamed_any_delta = True
+
+                # 2. Final answer arrived — send as fallback if no tokens were
+                #    streamed (i.e. model does not support generate_stream).
+                elif isinstance(item, FinalAnswerStep):
+                    final_answer = str(item.output) if item.output is not None else ""
+                    if not streamed_any_delta and final_answer.strip():
+                        loop.call_soon_threadsafe(queue.put_nowait, final_answer)
+
+                # 3. Skip ActionStep, PlanningStep, ToolCall, ToolOutput,
+                #    ActionOutput — content already covered by deltas above.
+
+            if not streamed_any_delta and not final_answer:
+                loop.call_soon_threadsafe(queue.put_nowait, "(No answer generated.)")
         except Exception as exc:  # noqa: BLE001
             logger.exception("Agent raised an exception (session=%s)", sid)
             loop.call_soon_threadsafe(queue.put_nowait, f"Agent error: {exc}")
         finally:
-            agent._current_queue = None
-            agent._current_loop = None
             loop.call_soon_threadsafe(queue.put_nowait, None)  # sentinel
 
     thread = Thread(target=_run, daemon=True)
