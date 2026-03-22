@@ -49,7 +49,7 @@ import uuid
 from collections.abc import AsyncGenerator
 from threading import Thread
 
-from smolagents import CodeAgent
+from smolagents import CodeAgent, ToolCallingAgent
 from smolagents.models import ChatMessageStreamDelta
 from smolagents.memory import FinalAnswerStep
 
@@ -70,7 +70,7 @@ def _make_agent() -> CodeAgent:
         max_steps=manager_agent.max_steps,
         additional_authorized_imports=manager_agent.authorized_imports,
         verbosity_level=manager_agent.logger.level,
-        instructions=_INSTRUCTIONS,
+        # instructions=_INSTRUCTIONS,
         stream_outputs=True,  # stream code-execution print outputs
     )
     return agent

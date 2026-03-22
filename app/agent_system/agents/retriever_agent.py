@@ -12,14 +12,14 @@ so that small local models like qwen3:1.7b can reliably call tools without
 failing to produce strict JSON blobs.
 """
 
-from smolagents import CodeAgent
+from smolagents import ToolCallingAgent
 
 from app.agent_system.model import model
 from app.agent_system.tools.retriever_tools import (
     huggingface_doc_retriever_tool,
 )
 
-retriever_agent = CodeAgent(
+retriever_agent = ToolCallingAgent(
     tools=[huggingface_doc_retriever_tool],
     model=model,
     max_steps=2,  # retrieve once, summarise once

@@ -61,12 +61,12 @@ manager_agent = CodeAgent(
     tools=[],
     model=model,
     managed_agents=[
-        web_agent,
         retriever_agent,
+        # web_agent,
     ],
     max_steps=2,  # plan(1) + delegate to sub-agents(2-3) + final answer(1)
     additional_authorized_imports=["time", "datetime", "PIL"],
     verbosity_level=1,
     stream_outputs=True,  # stream code-execution outputs
-    instructions=_INSTRUCTIONS,
+    # instructions=_INSTRUCTIONS,
 )
