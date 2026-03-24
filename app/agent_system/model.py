@@ -37,12 +37,8 @@ if _mode == "cloud":
     )
 else:
     # Local Ollama — pull the model first: ollama pull qwen3:1.7b
-    # extra_body={"think": False} disables qwen3's thinking mode so the model
-    # outputs content directly instead of spending token budget on hidden reasoning,
-    # which was causing Ollama 500 "internal service error" responses.
     model = OpenAIServerModel(
         model_id=os.environ.get("LLM_MODEL_ID", "qwen3:1.7b"),
         api_base=os.environ.get("LLAMA_SERVER_URL", "http://localhost:11434/v1"),
         api_key="ollama",  # required by client, ignored by Ollama
-        # extra_body={"think": False},
     )

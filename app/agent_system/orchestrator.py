@@ -34,13 +34,13 @@ You are a helpful assistant agent. You MUST follow these rules on EVERY step wit
 ## Output format (STRICT)
 Every response you produce must contain exactly one code block using this format:
 Thoughts: <your reasoning here>
-<code>
+```python
 # your Python code here
-</code>
+```
 
 - NEVER respond with plain text only.
-- NEVER omit the opening <code> tag or the closing </code> tag.
-- NEVER place text after the closing </code> tag.
+- NEVER omit the opening ```python tag or the closing ``` tag.
+- NEVER place text after the closing ``` tag.
 - The code block must always be present, even if you are just returning a final answer.
   In that case, use `final_answer("your answer here")` inside the code block.
 
@@ -52,9 +52,9 @@ Thoughts: <your reasoning here>
 
 ## Example of a correct final step
 Thoughts: I have the information needed. I will now return the final answer.
-<code>
+```python
 final_answer("Your synthesised answer goes here.")
-</code>
+```
 """
 
 manager_agent = CodeAgent(
@@ -64,9 +64,10 @@ manager_agent = CodeAgent(
         retriever_agent,
         # web_agent,
     ],
-    max_steps=2,  # plan(1) + delegate to sub-agents(2-3) + final answer(1)
+    max_steps=3,  # step1=delegate to sub-agent, step2=final_answer, +1 buffer
     additional_authorized_imports=["time", "datetime", "PIL"],
     verbosity_level=1,
     stream_outputs=True,  # stream code-execution outputs
-    # instructions=_INSTRUCTIONS,
+    code_block_tags="markdown",  # qwen3 outputs ```python blocks; align parser + system prompt
+    instructions=_INSTRUCTIONS,
 )

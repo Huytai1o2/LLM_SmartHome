@@ -16,7 +16,7 @@ from app.repositories.session_repo import (
     get_or_create_session,
     get_session,
 )
-from app.agent_system.runner import clear_session, stream_response
+from app.agent_system.runner import clear_session, stream_response, FinalAnswer
 
 router = APIRouter(prefix="/api/v1")
 
@@ -98,14 +98,28 @@ async def chat_stream(body: ChatRequest):
 
                 # 4. Stream the agent and emit delta events
                 reply_chunks: list[str] = []
+                final_answer_text: str | None = None
                 async for chunk in stream_response(
                     body.message, history, body.session_id
                 ):
-                    reply_chunks.append(chunk)
-                    await queue.put(_delta_event(chunk))
+                    if isinstance(chunk, FinalAnswer):
+                        # Executed final answer — stream it to the client and
+                        # capture it separately for clean DB storage.
+                        final_answer_text = chunk.text
+                        if chunk.text:
+                            await queue.put(_delta_event(chunk.text))
+                    else:
+                        reply_chunks.append(chunk)
+                        await queue.put(_delta_event(chunk))
 
-                # 5. Persist the full assistant reply AFTER streaming completes
-                full_reply = "".join(reply_chunks)
+                # 5. Persist ONLY the executed final answer to DB.
+                #    Fall back to joined deltas if the agent never called
+                #    final_answer() (e.g. on error / no-op steps).
+                full_reply = (
+                    final_answer_text
+                    if final_answer_text is not None
+                    else "".join(reply_chunks)
+                )
                 await insert_message(
                     db, body.session_id, MessageRole.assistant, full_reply
                 )

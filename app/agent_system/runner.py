@@ -49,11 +49,21 @@ import uuid
 from collections.abc import AsyncGenerator
 from threading import Thread
 
+from dataclasses import dataclass
+
 from smolagents import CodeAgent, ToolCallingAgent
 from smolagents.models import ChatMessageStreamDelta
 from smolagents.memory import FinalAnswerStep
 
 from app.agent_system.orchestrator import manager_agent, _INSTRUCTIONS
+
+
+@dataclass
+class FinalAnswer:
+    """The agent's executed final answer, distinct from raw LLM streaming tokens."""
+
+    text: str
+
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +82,8 @@ def _make_agent() -> CodeAgent:
         verbosity_level=manager_agent.logger.level,
         # instructions=_INSTRUCTIONS,
         stream_outputs=True,  # stream code-execution print outputs
+        code_block_tags="markdown",  # qwen3 outputs ```python blocks; align parser + system prompt
+        instructions=_INSTRUCTIONS,
     )
     return agent
 
@@ -96,7 +108,7 @@ async def stream_response(
     message: str,
     history: list[dict],
     session_id: str | uuid.UUID,
-) -> AsyncGenerator[str, None]:
+) -> AsyncGenerator["str | FinalAnswer", None]:
     """
     Async generator that yields text chunks as the agent processes the query.
 
@@ -134,7 +146,7 @@ async def stream_response(
     def _run() -> None:
         try:
             streamed_any_delta = False
-            final_answer: str | None = None
+            final_answer_text: str | None = None
 
             for item in agent.run(message, stream=True, reset=reset):
                 # 1. Real-time LLM token streaming
@@ -143,17 +155,21 @@ async def stream_response(
                         loop.call_soon_threadsafe(queue.put_nowait, item.content)
                         streamed_any_delta = True
 
-                # 2. Final answer arrived — send as fallback if no tokens were
-                #    streamed (i.e. model does not support generate_stream).
+                # 2. Final answer arrived — always send it as a FinalAnswer
+                #    object so the caller can store it separately from the
+                #    raw thought/code streaming tokens.
                 elif isinstance(item, FinalAnswerStep):
-                    final_answer = str(item.output) if item.output is not None else ""
-                    if not streamed_any_delta and final_answer.strip():
-                        loop.call_soon_threadsafe(queue.put_nowait, final_answer)
+                    final_answer_text = (
+                        str(item.output) if item.output is not None else ""
+                    )
+                    loop.call_soon_threadsafe(
+                        queue.put_nowait, FinalAnswer(text=final_answer_text)
+                    )
 
                 # 3. Skip ActionStep, PlanningStep, ToolCall, ToolOutput,
                 #    ActionOutput — content already covered by deltas above.
 
-            if not streamed_any_delta and not final_answer:
+            if not streamed_any_delta and not final_answer_text:
                 loop.call_soon_threadsafe(queue.put_nowait, "(No answer generated.)")
         except Exception as exc:  # noqa: BLE001
             logger.exception("Agent raised an exception (session=%s)", sid)
