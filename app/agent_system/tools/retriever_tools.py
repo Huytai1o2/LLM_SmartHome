@@ -3,7 +3,7 @@ Retriever tools backed by the three RAG store tiers:
 
 1. ``RetrieverTool``          — semantic search over the static FAISS index
                                 (device registry, sensor knowledge, rules, demonstrations).
-2. ``SensorLogsTool``         — live CSV reader for dynamic sensor logs (no embedding).
+2. ``SensorLogsTool``         — live sensor readings via the smart home hub API.
                                 Defined in sensor_logs_tool.py
 3. ``ConversationHistoryTool``— semantic search over asynchronously-embedded
                                 conversation history (VectorStore-Backed Memory).

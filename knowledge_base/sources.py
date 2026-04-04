@@ -44,6 +44,7 @@ _STATIC_SOURCES: dict[str, str] = {
     "sensor_knowledge.txt": "sensor_knowledge",
     "rules.txt": "rules",
     "demonstration.txt": "demonstration",
+    "device_sensor_types.txt": "device_sensor_types",
 }
 
 
