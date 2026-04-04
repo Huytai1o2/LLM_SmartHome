@@ -1,21 +1,23 @@
-"""Document sources for the RAG knowledge base.
+"""Document sources for the IoT Smart Home RAG knowledge base.
 
-This is the single place to define what gets indexed into the vector store.
-Add, remove, or replace sources here — the builder will pick them up
-automatically on the next run.
+This is the single place to define what gets indexed into the static FAISS
+vector store. Add, remove, or replace sources here — the builder will pick
+them up automatically on the next run.
 
-Current sources
----------------
-- HuggingFace docs dataset (``m-ric/huggingface_doc``)
+Static knowledge (embedded once)
+---------------------------------
+These four sources map directly to the "Static — embed once" tier in the
+architecture diagram:
 
-To add your own files later, load them here and extend the returned list::
+- ``device_registry.txt``   — all registered smart-home devices and their capabilities
+- ``sensor_knowledge.txt``  — sensor types, measurement ranges, and interpretation rules
+- ``rules.txt``             — automation rules (triggers, conditions, actions)
+- ``demonstration.txt``     — worked examples of agent commands and responses
 
-    from langchain_community.document_loaders import DirectoryLoader, TextLoader
-
-    dir_loader = DirectoryLoader("knowledge_base/files/", glob="**/*.txt",
-                                 loader_cls=TextLoader)
-    local_docs = dir_loader.load()
-    return hf_docs + local_docs
+Note: Sensor logs (CSV) and conversation history are handled separately —
+they are NOT embedded here:
+  • Sensor logs   → read live by ``app.vectore_store.sensor_logs``
+  • Conv. history → asynchronously embedded by ``app.vectore_store.conversation_memory``
 
 Typical usage
 -------------
@@ -29,51 +31,53 @@ from __future__ import annotations
 import logging
 from typing import List
 
+from langchain_community.document_loaders import TextLoader, DirectoryLoader
 from langchain_core.documents import Document
 
 logger = logging.getLogger(__name__)
 
+IOT_KNOWLEDGE_PATH: str = "knowledge_base/iot_knowledge"
 
-def _load_hf_dataset() -> List[Document]:
-    """Download and return documents from the HuggingFace docs dataset."""
-    import datasets
+# Map each knowledge file to a human-readable source tag used in metadata
+_STATIC_SOURCES: dict[str, str] = {
+    "device_registry.txt": "device_registry",
+    "sensor_knowledge.txt": "sensor_knowledge",
+    "rules.txt": "rules",
+    "demonstration.txt": "demonstration",
+}
 
-    logger.info("Loading HuggingFace docs dataset (m-ric/huggingface_doc)...")
-    knowledge_base = datasets.load_dataset("m-ric/huggingface_doc", split="train")
-    docs = [
-        Document(
-            page_content=doc["text"],
-            metadata={"source": doc["source"].split("/")[1]},
-        )
-        for doc in knowledge_base
-    ]
-    logger.info("Loaded %d documents from HuggingFace dataset.", len(docs))
+
+def _load_iot_static() -> List[Document]:
+    """Load the four static IoT knowledge files and return LangChain Documents."""
+    import os
+
+    docs: List[Document] = []
+    for filename, source_tag in _STATIC_SOURCES.items():
+        filepath = os.path.join(IOT_KNOWLEDGE_PATH, filename)
+        if not os.path.isfile(filepath):
+            logger.warning("Static knowledge file not found, skipping: '%s'", filepath)
+            continue
+        loader = TextLoader(filepath, encoding="utf-8")
+        file_docs = loader.load()
+        for doc in file_docs:
+            doc.metadata["source"] = source_tag
+        docs.extend(file_docs)
+        logger.info("Loaded %d document(s) from '%s'.", len(file_docs), filename)
+
     return docs
 
 
 def load_documents() -> List[Document]:
     """
-    Return the full list of LangChain Documents to be indexed.
+    Return all LangChain Documents to be indexed into the static FAISS store.
 
-    This is the entrypoint called by the vector store builder. Extend this
-    function when you want to add new document sources.
+    Called by the vector store builder. Extend this function to add more
+    static knowledge sources.
     """
     docs: List[Document] = []
 
-    # --- Source 1: HuggingFace docs dataset (replace with your own sources) ---
-    docs.extend(_load_hf_dataset())
+    # --- IoT static knowledge (device registry, sensor knowledge, rules, demonstrations) ---
+    docs.extend(_load_iot_static())
 
-    # --- Source 2: Local files (uncomment and adjust when ready) -------------
-    # from langchain_community.document_loaders import DirectoryLoader, TextLoader
-    # from langchain_community.document_loaders import PyPDFLoader
-    # from langchain_community.document_loaders import UnstructuredMarkdownLoader
-    # loaders = [
-    #     DirectoryLoader("knowledge_base/files/", glob="**/*.txt",  loader_cls=TextLoader),
-    #     DirectoryLoader("knowledge_base/files/", glob="**/*.pdf",  loader_cls=PyPDFLoader),
-    #     DirectoryLoader("knowledge_base/files/", glob="**/*.md",   loader_cls=UnstructuredMarkdownLoader),
-    # ]
-    # for loader in loaders:
-    #     docs.extend(loader.load())
-
-    logger.info("Total documents collected: %d", len(docs))
+    logger.info("Total static documents collected: %d", len(docs))
     return docs

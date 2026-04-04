@@ -17,6 +17,7 @@ from app.repositories.session_repo import (
     get_session,
 )
 from app.agent_system.runner import clear_session, stream_response, FinalAnswer
+from app.vectore_store.conversation_memory import async_save_conversation
 
 router = APIRouter(prefix="/api/v1")
 
@@ -125,7 +126,15 @@ async def chat_stream(body: ChatRequest):
                 )
                 await db.commit()
 
-                # 6. Signal completion
+                # 6. Embed the conversation turn in a thread-pool executor so
+                #    the event loop stays unblocked, but we await completion so
+                #    the history is guaranteed to be stored before the next request.
+                await async_save_conversation(
+                    inputs={"input": body.message},
+                    outputs={"output": full_reply},
+                )
+
+                # 7. Signal completion
                 await queue.put(_done_event(body.session_id))
 
             except Exception as exc:  # noqa: BLE001
