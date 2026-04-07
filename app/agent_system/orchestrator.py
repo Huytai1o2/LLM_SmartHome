@@ -21,6 +21,7 @@ appropriate there because it generates Python that calls CoreIoT tool functions.
 
 from __future__ import annotations
 
+import ast
 import json
 import logging
 import re
@@ -115,7 +116,12 @@ def _parse_json(text: str) -> any:
     match = re.search(r"[{\[]", text)
     if match:
         text = text[match.start():]
-    return json.loads(text)
+        
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        # Nhờ ast (Abstract Syntax Tree) để parse json xài nháy đơn (dict của Python)
+        return ast.literal_eval(text)
 
 
 def _extract_intent(

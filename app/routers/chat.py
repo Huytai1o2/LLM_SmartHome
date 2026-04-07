@@ -39,7 +39,7 @@ class ChatRequest(BaseModel):
 def _delta_event(text: str) -> ServerSentEvent:
     return ServerSentEvent(
         event="agent.message.delta",
-        data=json.dumps({"text": text}),
+        data=json.dumps({"text": text}, ensure_ascii=False),
     )
 
 

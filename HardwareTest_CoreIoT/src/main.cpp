@@ -103,9 +103,7 @@ void ledTask(void *pvParameters) {
             digitalWrite(LED_PIN, state ? HIGH : LOW);
             Serial.printf("[LED] %s\n", state ? "ON" : "OFF");
             
-            // Delay 150ms để tránh gửi mạng quá sát với thời điểm phản hồi RPC
-            // Nếu gửi 2 gói tin liên tục trong < 1ms, Server có thể hiểu nhầm là spam/rate-limit và tự ngắt kết nối
-            vTaskDelay(pdMS_TO_TICKS(500));
+            // Xóa đi các lệnh delay vì nó làm gián đoạn chuỗi gửi response RPC về phía TB server
             
             // Báo cho loop() biết task đã bật/tắt xong -> gửi update lên ThingsBoard
             pendingAttrUpdate = true;
