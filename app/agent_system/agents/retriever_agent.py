@@ -1,50 +1,28 @@
 """
-Managed Retriever Agent
+Retriever Agent — Device Selector
 
-Equipped with two tools:
-  - RetrieverTool           : semantic search over static IoT knowledge
-                              (device registry, device_sensor_types, rules, demonstrations).
-  - ConversationHistoryTool : semantic search over async-embedded conversation history.
+Architecture note
+-----------------
+Device selection is implemented as a direct LLM call with Pydantic structured
+output (JSON mode) in ``app/agent_system/orchestrator._select_devices()``.
 
-Purpose: look up device_id and sensor_type from the knowledge base for a given query,
-so the manager can pass that info to smart_home_agent to fetch the live reading.
+Using a CodeAgent here was unreliable: small local models (gemma4:e2b) would
+attempt to parse the YAML programmatically (json.loads on YAML text, wrong
+attribute index selection, hallucinated kwargs like mode="request").
 
-Uses ToolCallingAgent (JSON format) for structured tool invocation.
+The deterministic flow is now:
+  iterate_smart_home_yaml(room, type) → yaml_subset (str)
+      ↓
+  _select_devices(user_message, yaml_subset)
+      → LLM call with response_format={"type": "json_object"}
+      → validated via DeviceActionList Pydantic model
+      → List[DeviceAction]
+      ↓
+  iot_action_agent.run(devices_json)  ← only CodeAgent in the pipeline
+
+This file is kept as a reference/import stub so external code that imports
+``retriever_agent`` doesn't break.  The actual logic lives in the orchestrator.
 """
 
-from smolagents import ToolCallingAgent
-
-from app.agent_system.model import model
-from app.agent_system.tools.retriever_tools import (
-    huggingface_doc_retriever_tool,
-    conversation_history_tool,
-)
-
-_RETRIEVER_INSTRUCTIONS = """
-You are a knowledge assistant for an IoT smart home system.
-Answer questions from the knowledge base only. Do NOT invent sensor values or readings.
-
-## General knowledge questions (automation rules, device specs, capabilities):
-Search the knowledge base with `huggingface_doc_retriever` and return the relevant information.
-
-## Conversation history questions ("what did I ask before?", "previous sessions"):
-Use `conversation_history_retriever`.
-"""
-
-retriever_agent = ToolCallingAgent(
-    tools=[
-        huggingface_doc_retriever_tool,  # static knowledge (FAISS)
-        conversation_history_tool,  # conversation history (async-embedded FAISS)
-    ],
-    model=model,
-    max_steps=3,
-    verbosity_level=1,
-    stream_outputs=True,
-    name="retriever_agent",
-    description=(
-        "Answers general knowledge questions about the smart home: automation rules, "
-        "device capabilities, specifications, and conversation history lookups. "
-        "Does NOT handle sensor readings or control commands — use smart_home_agent for those."
-    ),
-    instructions=_RETRIEVER_INSTRUCTIONS,
-)
+# The retriever logic is in orchestrator._select_devices().
+# Nothing to import here — this module is intentionally empty.

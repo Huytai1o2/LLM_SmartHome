@@ -1,57 +1,70 @@
 """
-Managed Clarification Agent
+Clarification Agent — resolves missing room/device context.
 
-Handles ambiguous user queries that are missing required details (e.g. device location).
-
-Equipped with:
-  - RetrieverTool             : looks up what devices and locations exist in the smart home.
-  - ConversationHistoryTool   : checks past conversation turns to see if the user already
-                                mentioned a location earlier in the session.
-
-This lets it give the user concrete options rather than a generic "please specify",
-and avoids asking again if the location was already stated before.
+No LLM, no code generation — fully deterministic:
+  1. Check Buffer Window Memory for cached device/room this session.
+  2. If still missing → list candidate rooms from YAML and ask one question.
 """
 
-from smolagents import ToolCallingAgent
+from __future__ import annotations
 
-from app.agent_system.model import model
-from app.agent_system.tools.retriever_tools import (
-    huggingface_doc_retriever_tool,
-    conversation_history_tool,
-)
+import json
+import re
 
-_CLARIFICATION_INSTRUCTIONS = """
-You are a clarification assistant for an IoT smart home system.
-Your ONLY job is to return a SHORT question asking the user which room they mean.
+from app.agent_system.tools.buffer_window_tools import check_buffer_window_tool
+from app.agent_system.tools.yaml_iterator import iterate_smart_home_yaml_tool
 
-Steps:
-1. Use `conversation_history_retriever` to check if the user already mentioned a location
-   earlier in the conversation. If a location is found, return it as plain text so the
-   caller can proceed — do NOT ask again.
-2. If no prior location is found, use `retriever` to look up which rooms have that device type.
-3. Return ONLY a single short question with the available rooms listed.
-   Do NOT resolve the command. Do NOT explain. Do NOT add any preamble.
 
-Good output example:
-  "Which speaker did you mean? I found one in: living room. Please specify the room."
-  "Which light did you mean? Available rooms: living room, bedroom, kitchen."
+_DEVICE_TYPE_MAP = {
+    "đèn": "smart_light",
+    "bóng đèn": "smart_light",
+    "đèn trần": "smart_light",
+    "đèn ngủ": "smart_light",
+    "đèn bếp": "smart_light",
+    "quạt": "smart_fan",
+    "quạt trần": "smart_fan",
+    "light": "smart_light",
+    "fan": "smart_fan",
+}
 
-Bad output — NEVER do this:
-  "The speaker is in the living room so the command would be POST /api/devices/..."
-"""
 
-clarification_agent = ToolCallingAgent(
-    tools=[huggingface_doc_retriever_tool, conversation_history_tool],
-    model=model,
-    max_steps=3,  # history check + retrieval + return question
-    verbosity_level=1,
-    stream_outputs=True,
-    name="clarification_agent",
-    description=(
-        "Handles ambiguous device control requests that are missing a location. "
-        "Looks up available devices from the knowledge base and asks the user a targeted "
-        "follow-up question listing the specific rooms/locations they can choose from. "
-        "Use this whenever the user refers to a device by type only without specifying a room."
-    ),
-    instructions=_CLARIFICATION_INSTRUCTIONS,
-)
+def _infer_device_type(user_message: str) -> str | None:
+    msg = user_message.lower()
+    for keyword, dtype in _DEVICE_TYPE_MAP.items():
+        if keyword in msg:
+            return dtype
+    return None
+
+
+class ClarificationAgent:
+    """Deterministic clarification — no LLM, no code generation."""
+
+    def run(self, user_message: str) -> str:
+        # Step 1 — Check Buffer Window Memory
+        cached = check_buffer_window_tool.forward(user_message)
+        if cached != "[]":
+            try:
+                hit = json.loads(cached)[0]
+                return (
+                    f"CACHED: device_name={hit['device_name']}, "
+                    f"room={hit['room']}, token={hit['token']}"
+                )
+            except (json.JSONDecodeError, IndexError, KeyError):
+                pass
+
+        # Step 2 — List rooms from YAML and ask one question
+        device_type = _infer_device_type(user_message)
+        yaml_result = iterate_smart_home_yaml_tool.forward(
+            room_name="", type_device=device_type or ""
+        )
+        rooms = re.findall(r"name:\s*(\S+)", yaml_result)
+        # Filter out device names (rooms are snake_case like living_room, kitchen)
+        room_names = [r for r in rooms if "_" in r or r in ("kitchen", "bedroom")]
+        if not room_names:
+            room_names = list(dict.fromkeys(rooms))  # deduplicate, preserve order
+
+        room_list = ", ".join(room_names) if room_names else "không rõ"
+        return f"Bạn muốn điều khiển ở phòng nào? Các phòng hiện có: {room_list}."
+
+
+clarification_agent = ClarificationAgent()

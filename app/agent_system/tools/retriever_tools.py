@@ -1,11 +1,9 @@
 """
-Retriever tools backed by the three RAG store tiers:
+Retriever tools backed by the RAG store tiers:
 
 1. ``RetrieverTool``          — semantic search over the static FAISS index
-                                (device registry, sensor knowledge, rules, demonstrations).
-2. ``SensorLogsTool``         — live sensor readings via the smart home hub API.
-                                Defined in sensor_logs_tool.py
-3. ``ConversationHistoryTool``— semantic search over asynchronously-embedded
+                                (automation rules, demonstration examples).
+2. ``ConversationHistoryTool``— semantic search over asynchronously-embedded
                                 conversation history (VectorStore-Backed Memory).
                                 Defined in conversation_history_tool.py
 """
@@ -17,7 +15,6 @@ import logging
 from smolagents import Tool
 
 from app.vectore_store.store import get_vector_store
-from app.agent_system.tools.sensor_logs_tool import SensorLogsTool, sensor_logs_tool
 from app.agent_system.tools.conversation_history_tool import (
     ConversationHistoryTool,
     conversation_history_tool,
@@ -27,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# 1. Static knowledge retriever (device registry, rules, sensor knowledge, demos)
+# Static knowledge retriever (rules, demonstrations)
 # ---------------------------------------------------------------------------
 
 
@@ -35,8 +32,7 @@ class RetrieverTool(Tool):
     name = "retriever"
     description = (
         "Retrieves documents from the static IoT knowledge base using semantic similarity. "
-        "The knowledge base contains device registry, sensor knowledge, automation rules, "
-        "and demonstration examples."
+        "The knowledge base contains automation rules and demonstration examples."
     )
     inputs = {
         "query": {
@@ -67,9 +63,7 @@ huggingface_doc_retriever_tool = RetrieverTool()
 
 __all__ = [
     "RetrieverTool",
-    "SensorLogsTool",
     "ConversationHistoryTool",
     "huggingface_doc_retriever_tool",
-    "sensor_logs_tool",
     "conversation_history_tool",
 ]
