@@ -89,6 +89,38 @@ User (HTTP / SSE)
 
 See [docs/running_the_app.md](docs/running_the_app.md) for the full step-by-step guide.
 
+### Method 1: Using the Start Script (Recommended)
+
+We provide a single script to automatically start the database, run migrations, and launch both the backend API and frontend web interface together.
+
+```bash
+# 1. Activate venv
+source .IotAgent_venv/bin/activate
+
+# 2. Install deps (First time only)
+pip install -r requirements.txt
+
+# 3. Configure env vars (First time only)
+cp .env.example .env   # then edit with your values
+
+# 4. Pull LLM (If using local)
+ollama pull gemma4:e2b && ollama serve
+
+# 5. Make the script executable and run it
+chmod +x start.sh
+./start.sh
+```
+
+**The system will be available at:**
+* **Web Chat (Frontend):** `http://localhost:3000`
+* **Backend API:** `http://localhost:8000`
+
+*Press `Ctrl + C` to securely gracefully stop both the system and the database connection.*
+
+---
+
+### Method 2: Manual Setup
+
 ```bash
 # 1. Activate venv
 source .IotAgent_venv/bin/activate
