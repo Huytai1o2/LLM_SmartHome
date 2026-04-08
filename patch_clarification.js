@@ -1,4 +1,7 @@
-"""
+const fs = require('fs');
+let code = fs.readFileSync('app/agent_system/agents/clarification_agent.py', 'utf8');
+
+const newCode = `"""
 Clarification Agent — resolves missing room/device context.
 
 No LLM, no code generation — fully deterministic:
@@ -12,17 +15,31 @@ import json
 import re
 
 from app.agent_system.tools.buffer_window_tools import check_buffer_window_tool
-from app.agent_system.tools.yaml_iterator import iterate_smart_home_yaml_tool, list_available_rooms, get_device_keyword_mapping
+from app.agent_system.tools.yaml_iterator import iterate_smart_home_yaml_tool
+
+
+_DEVICE_TYPE_MAP = {
+    "đèn": "smart_light",
+    "bóng đèn": "smart_light",
+    "đèn trần": "smart_light",
+    "đèn ngủ": "smart_light",
+    "đèn bếp": "smart_light",
+    "quạt": "smart_fan",
+    "quạt trần": "smart_fan",
+    "light": "smart_light",
+    "fan": "smart_fan",
+    "tất cả thiết bị": "all",
+    "các thiết bị": "all",
+    "mọi thứ": "all",
+    "tất cả": "all"
+}
 
 
 def _infer_device_type(user_message: str) -> str | None:
     msg = user_message.lower()
-    device_type_map = get_device_keyword_mapping()
-    
-    # Sort keys by length descending to match longest phrase first ("đèn trần" before "đèn")
-    for keyword in sorted(device_type_map.keys(), key=len, reverse=True):
+    for keyword, dtype in _DEVICE_TYPE_MAP.items():
         if keyword in msg:
-            return device_type_map[keyword]
+            return dtype
     return None
 
 
@@ -59,17 +76,13 @@ class ClarificationAgent:
 
         # Step 2 — Missing Room
         if not has_room:
-            # We filter rooms that actually have the requested device type
-            room_names = list_available_rooms()
-            if device_type and device_type != "all":
-                # Only offer rooms that actually contain the requested device
-                yaml_result = iterate_smart_home_yaml_tool.forward(
-                    room_name="", type_device=device_type
-                )
-                rooms = re.findall(r"name:\s*(\S+)", yaml_result)
-                # Keep rooms that appear in yaml_result
-                room_names = [r for r in room_names if r in rooms]
-            
+            yaml_result = iterate_smart_home_yaml_tool.forward(
+                room_name="", type_device=device_type or ""
+            )
+            rooms = re.findall(r"name:\\s*(\\S+)", yaml_result)
+            room_names = [r for r in rooms if "_" in r or r in ("kitchen", "bedroom")]
+            if not room_names:
+                room_names = list(dict.fromkeys(rooms))
             room_list = ", ".join(room_names) if room_names else "không rõ"
             return f"Bạn muốn điều khiển ở phòng nào? Các phòng hiện có: {room_list}."
             
@@ -81,3 +94,7 @@ class ClarificationAgent:
 
 
 clarification_agent = ClarificationAgent()
+`;
+
+fs.writeFileSync('app/agent_system/agents/clarification_agent.py', newCode);
+console.log("Patched clarification_agent!");

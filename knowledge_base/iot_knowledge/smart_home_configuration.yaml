@@ -23,6 +23,34 @@ rooms:
             - name_key: led
               value: boolean
               description: Indicates whether the LED light is on or off
+      
+      - name_type: smart_fan
+        devices:
+          - name: quạt trần
+            device_token: z9y8x7w6v5u4t3s2r1q0
+            device_id: your-device-uuid-here
+            description_location: the ceiling of the living room
+            shared_attributes:
+              - name_key: speed
+                value: integer
+                description: Represents the speed level of the fan (0-3)
+              - name_key: toogle
+                value: boolean
+                description: Indicates whether the fan is on or off
+
+      - name_type: smart_thermostat
+        devices:
+          - name: điều hòa
+            device_token: m1n2o3p4q5r6s7t8u9v0
+            device_id: your-device-uuid-here
+            description_location: the wall of the living room
+            shared_attributes:
+              - name_key: temperature
+                value: integer
+                description: Represents the temperature setting of the thermostat (in degrees Celsius)
+              - name_key: mode
+                value: string
+                description: Represents the mode of the thermostat (e.g., "cool", "heat", "auto")
 
   - name: kitchen
     type_device:

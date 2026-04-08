@@ -110,7 +110,14 @@ alembic upgrade head
 
 # 7. Start server (FAISS builds automatically on first run)
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+# 8. Start the web frontend (in a new terminal)
+cd frontend
+npm install
+npm run dev
 ```
+
+The web interface will be available at `http://localhost:3000`.
 
 ---
 

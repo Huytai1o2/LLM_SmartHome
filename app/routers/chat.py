@@ -36,10 +36,10 @@ class ChatRequest(BaseModel):
 # ── SSE helpers ───────────────────────────────────────────────────────────────
 
 
-def _delta_event(text: str) -> ServerSentEvent:
+def _delta_event(text: str, is_final: bool = False) -> ServerSentEvent:
     return ServerSentEvent(
         event="agent.message.delta",
-        data=json.dumps({"text": text}, ensure_ascii=False),
+        data=json.dumps({"text": text, "is_final": is_final}, ensure_ascii=False),
     )
 
 
@@ -108,10 +108,10 @@ async def chat_stream(body: ChatRequest):
                         # capture it separately for clean DB storage.
                         final_answer_text = chunk.text
                         if chunk.text:
-                            await queue.put(_delta_event(chunk.text))
+                            await queue.put(_delta_event(chunk.text, is_final=True))
                     else:
                         reply_chunks.append(chunk)
-                        await queue.put(_delta_event(chunk))
+                        await queue.put(_delta_event(chunk, is_final=False))
 
                 # 5. Persist ONLY the executed final answer to DB.
                 #    Fall back to joined deltas if the agent never called

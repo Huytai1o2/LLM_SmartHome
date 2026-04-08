@@ -174,6 +174,50 @@ def list_available_type_devices(
     return types
 
 
+def get_device_keyword_mapping(yaml_path: str = DEFAULT_YAML_PATH) -> dict[str, str]:
+    """Dynamically generate a mapping of device keywords to their type_device.
+    E.g. 'đèn trần' -> 'smart_light', 'quạt' -> 'smart_fan'.
+    """
+    data = _load_yaml(yaml_path)
+    mapping = {
+        "tất cả thiết bị": "all",
+        "các thiết bị": "all",
+        "mọi thứ": "all",
+        "tất cả": "all"
+    }
+    
+    for room in data.get("rooms", []):
+        for td in room.get("type_device", []) or []:
+            name_type = td.get("name_type")
+            if not name_type:
+                continue
+            name_type = str(name_type)
+            mapping[name_type] = name_type  # map the exact type name to itself
+            
+            for dev in td.get("devices", []) or []:
+                dev_name = str(dev.get("name", "")).lower().strip()
+                if not dev_name:
+                    continue
+                mapping[dev_name] = name_type
+                
+                # Extract first word as a generic keyword (e.g. "đèn" from "đèn trần")
+                first_word = dev_name.split()[0]
+                if first_word not in mapping:
+                    mapping[first_word] = name_type
+                
+                # If first word is "điều" (as in "điều hòa"), map the whole word
+                if first_word == "điều" and "hòa" in dev_name:
+                    mapping["điều hòa"] = name_type
+                
+                # English mappings for basics
+                if "light" in name_type and "light" not in mapping:
+                    mapping["light"] = name_type
+                if "fan" in name_type and "fan" not in mapping:
+                    mapping["fan"] = name_type
+
+    return mapping
+
+
 # ---------------------------------------------------------------------------
 # smolagents Tool wrapper
 # ---------------------------------------------------------------------------
@@ -236,8 +280,10 @@ __all__ = [
     "iterate_smart_home_yaml",
     "list_available_rooms",
     "list_available_type_devices",
+    "get_device_keyword_mapping",
     "reload_yaml_cache",
     "IterateSmartHomeYamlTool",
     "iterate_smart_home_yaml_tool",
     "DEFAULT_YAML_PATH",
 ]
+# EOF

@@ -33,7 +33,7 @@ from app.agent_system.agents.iot_action_agent import iot_action_agent
 from app.agent_system.model import model
 from app.agent_system.schemas import DeviceAction, DeviceActionList, UserIntent
 from app.agent_system.tools.buffer_window_tools import check_buffer_window_tool
-from app.agent_system.tools.yaml_iterator import iterate_smart_home_yaml
+from app.agent_system.tools.yaml_iterator import iterate_smart_home_yaml, list_available_rooms, get_device_keyword_mapping
 
 logger = logging.getLogger(__name__)
 
@@ -41,27 +41,47 @@ logger = logging.getLogger(__name__)
 # System prompts for structured LLM calls
 # ---------------------------------------------------------------------------
 
-_INTENT_SYSTEM_PROMPT = """\
+def _get_intent_system_prompt() -> str:
+    from collections import defaultdict
+    rooms = list_available_rooms()
+    mapping = get_device_keyword_mapping()
+    
+    # Reverse mapping for grouping
+    type_to_keywords = defaultdict(list)
+    for kw, t in mapping.items():
+        if t != "all" and kw != t:
+            type_to_keywords[t].append(kw)
+            
+    device_mapping_lines = []
+    for t, keys in type_to_keywords.items():
+        device_mapping_lines.append(f"  {' / '.join(keys)} → \"{t}\"")
+        
+    return f"""\
 You are an IoT intent extractor for a Vietnamese smart home system.
 Given the user's message, extract room_name and type_device.
-Output ONLY valid JSON: {"room_name": "...", "type_device": "..."}
+Output ONLY valid JSON: {{"room_name": "...", "type_device": "..."}}
 
-Room mappings:
-  phòng khách                → "living_room"
-  bếp / nhà bếp / phòng bếp → "kitchen"
-  phòng ngủ                  → "bedroom"
+Available Rooms in system: {', '.join(rooms)}
+Room mappings examples (infer based on meaning):
+  tất cả phòng / các phòng   → "all"
+  2 phòng trở lên            → ["living_room", "kitchen", ...]
   not mentioned              → null
 
 Device type mappings:
-  đèn / bóng đèn / đèn trần / đèn ngủ / đèn bếp → "smart_light"
-  quạt / quạt trần                                → "smart_fan"
+{chr(10).join(device_mapping_lines)}
+  tất cả thiết bị / các thiết bị / mọi thứ / tất cả  → "all"
   not mentioned                                   → null
 
 Examples:
-  "bật đèn trần phòng khách" → {"room_name": "living_room", "type_device": "smart_light"}
-  "tắt quạt bếp"             → {"room_name": "kitchen",     "type_device": "smart_fan"}
-  "bật đèn"                  → {"room_name": null,           "type_device": "smart_light"}
-  "phòng khách"              → {"room_name": "living_room",  "type_device": null}
+  "bật đèn trần phòng khách" → {{"room_name": "living_room", "type_device": "smart_light"}}
+  "tắt quạt bếp"             → {{"room_name": "kitchen",     "type_device": "smart_fan"}}
+  "bật tất cả thiết bị bếp"  → {{"room_name": "kitchen",     "type_device": "all"}}
+  "tắt hết mọi thiết bị"     → {{"room_name": "all",         "type_device": "all"}}
+  "bật đèn"                  → {{"room_name": null,          "type_device": "smart_light"}}
+  "bật tất cả đèn"           → {{"room_name": "all",         "type_device": "smart_light"}}
+  "tất cả thiết bị ở phòng khách và bếp"         → {{"room_name": ["living_room", "kitchen"], "type_device": "all"}}
+  "cả nhà"                   → {{"room_name": "all",         "type_device": "all"}}
+  "phòng khách"              → {{"room_name": "living_room", "type_device": null}}
 """
 
 _RETRIEVER_SYSTEM_PROMPT = """\
@@ -136,7 +156,7 @@ def _extract_intent(
     def _text(text: str) -> list:
         return [{"type": "text", "text": text}]
 
-    messages: list = [{"role": "system", "content": _text(_INTENT_SYSTEM_PROMPT)}]
+    messages: list = [{"role": "system", "content": _text(_get_intent_system_prompt())}]
 
     if history:
         for msg in history[-4:]:  # last 2 turns (4 messages) for context
@@ -151,8 +171,8 @@ def _extract_intent(
             room_name=data.get("room_name") or None,
             type_device=data.get("type_device") or None,
         )
-    except Exception:
-        logger.exception("Intent extraction failed — returning empty intent")
+    except Exception as e:
+        logger.warning(f"Intent extraction failed: {str(e)} — returning empty intent")
         return UserIntent()
 
 
@@ -189,8 +209,8 @@ def _select_devices(user_message: str, yaml_subset: str) -> List[DeviceAction]:
 
         return DeviceActionList(devices=raw_list).devices
 
-    except Exception:
-        logger.exception("Device selection failed")
+    except Exception as e:
+        logger.warning(f"Device selection failed: {str(e)}")
         return []
 
 
@@ -217,14 +237,14 @@ def run_iot_pipeline(
         The final answer string to send back to the user.
     """
 
-    def emit(text: str) -> None:
+    def emit(agent_name: str, text: str) -> None:
         if on_step:
-            on_step(text)
+            on_step(f"{agent_name}: {text}\n\n")
 
     # ------------------------------------------------------------------
     # Step 1 — Extract intent (Pydantic structured output, no code gen)
     # ------------------------------------------------------------------
-    emit("Đang phân tích yêu cầu...\n")
+    emit("Orchestrator", "Đang phân tích yêu cầu...")
     intent = _extract_intent(user_message, history=history)
     logger.info("Extracted intent: room=%s type=%s", intent.room_name, intent.type_device)
 
@@ -240,8 +260,9 @@ def run_iot_pipeline(
             if intent.type_device is None:
                 intent.type_device = hit.get("type_device") or None
             emit(
+                "Orchestrator",
                 f"Bộ nhớ đệm: {hit.get('device_name')} "
-                f"({hit.get('room')})\n"
+                f"({hit.get('room')})"
             )
             logger.debug("Buffer hit: %s", hit)
         except (json.JSONDecodeError, IndexError, KeyError):
@@ -251,33 +272,33 @@ def run_iot_pipeline(
     # Step 3 — Clarify if info still missing
     # ------------------------------------------------------------------
     if intent.room_name is None or intent.type_device is None:
-        emit("Cần thêm thông tin...\n")
-        question = clarification_agent.run(user_message)
-        return str(question)
+        emit("Orchestrator", "Cần thêm thông tin...")
+        question = clarification_agent.run(user_message, intent)
+        return f"Clarification_Agent: {str(question)}"
 
-    emit(f"Phòng: {intent.room_name} | Thiết bị: {intent.type_device}\n")
+    emit("Orchestrator", f"Phòng: {intent.room_name} | Thiết bị: {intent.type_device}")
 
     # ------------------------------------------------------------------
     # Step 4 — Iterate YAML → focused subset (deterministic, no LLM)
     # ------------------------------------------------------------------
     yaml_subset = iterate_smart_home_yaml(
-        room_name=intent.room_name,
-        type_device=intent.type_device,
+        room_name=None if intent.room_name == "all" else intent.room_name,
+        type_device=None if intent.type_device == "all" else intent.type_device,
     )
     if yaml_subset.strip() == "rooms: []":
         return (
-            f"Không tìm thấy thiết bị '{intent.type_device}' "
+            f"Orchestrator: Không tìm thấy thiết bị '{intent.type_device}' "
             f"trong '{intent.room_name}'."
         )
 
     # ------------------------------------------------------------------
     # Step 5 — Select target device(s) (Pydantic structured output)
     # ------------------------------------------------------------------
-    emit("Đang chọn thiết bị...\n")
+    emit("Orchestrator", "Đang chọn thiết bị...")
     devices = _select_devices(user_message, yaml_subset)
 
     if not devices:
-        return "Không thể xác định thiết bị cần điều khiển."
+        return "Orchestrator: Không thể xác định thiết bị cần điều khiển."
 
     devices_json = json.dumps(
         [d.model_dump() for d in devices], ensure_ascii=False
@@ -288,6 +309,6 @@ def run_iot_pipeline(
     # Step 6 — Route & execute via iot_action_agent (CodeAgent)
     # Decides write vs read split, calls post/read tools, updates BufferWindow
     # ------------------------------------------------------------------
-    emit("Đang thực thi lệnh...\n")
+    emit("Orchestrator", "Đang thực thi lệnh...")
     result = iot_action_agent.run(devices_json)
-    return str(result)
+    return f"IoT_Action_Agent: {str(result)}"

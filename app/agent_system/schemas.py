@@ -26,14 +26,14 @@ class UserIntent(BaseModel):
     is needed.
     """
 
-    room_name: Optional[str] = Field(
+    room_name: Any = Field(
         default=None,
         description=(
             "The room name in snake_case English, e.g. 'living_room', 'kitchen', "
             "'bedroom'. None if the user did not mention a room."
         ),
     )
-    type_device: Optional[str] = Field(
+    type_device: Any = Field(
         default=None,
         description=(
             "The device category, e.g. 'smart_light' or 'smart_fan'. "
@@ -62,7 +62,7 @@ class DeviceAction(BaseModel):
         description="CoreIoT device UUID — required for Server-Side RPC control.",
     )
     room: str
-    type_device: Optional[str] = Field(
+    type_device: Any = Field(
         default=None,
         description="Device category from YAML e.g. 'smart_light', 'smart_fan'.",
     )
