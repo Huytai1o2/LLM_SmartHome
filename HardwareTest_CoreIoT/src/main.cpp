@@ -16,17 +16,27 @@ constexpr char     THINGSBOARD_SERVER[] = "app.coreiot.io";
 constexpr uint16_t THINGSBOARD_PORT     = 1883U;
 constexpr uint32_t SERIAL_BAUD          = 115200U;
 
-// ── Hardware ──────────────────────────────────────────────────────────────────
-constexpr int LED_PIN = 2;
-
 // ── Keys / RPC ────────────────────────────────────────────────────────────────
-constexpr char    LED_KEY[]       = "led";
-constexpr char    RPC_SET_VALUE[] = "setValue";
-constexpr uint8_t MAX_RPC_SUBS   = 1U;
-constexpr uint8_t MAX_RPC_RESP   = 1U;
+constexpr char    LED_CELLING_KEY[] = "led_celling";
+constexpr char    LED_NIGHT_KEY[]   = "led_beside_night_light";
+constexpr char    COLOR_NIGHT_KEY[] = "brightness_beside_night_light";
+constexpr char    FAN_SPEED_KEY[]   = "integer_fan_speed";
+
+constexpr char    RPC_SET_VALUE[]   = "setValue";
+constexpr uint8_t MAX_RPC_SUBS      = 1U;
+constexpr uint8_t MAX_RPC_RESP      = 5U; // Tăng lên 5 để tránh lỗi "response overflowed" gây ra HTTP 408 Timeout
+
+// ── Hardware ──────────────────────────────────────────────────────────────────
+#include <Adafruit_NeoPixel.h>
+constexpr int LED_CELLING_PIN = 48; // Pin for Celling LED
+constexpr int FAN_PIN         = 3;  // Example Pin for Fan PWM
+constexpr int RGB_PIN         = 6;  // Cập nhật PIN RGB thành 6 theo sơ đồ LED
+constexpr int NUM_PIXELS      = 4;  // Module 4 RGB LEDs
+
+Adafruit_NeoPixel pixels(NUM_PIXELS, RGB_PIN, NEO_GRB + NEO_KHZ800);
 
 // ── ThingsBoard objects ───────────────────────────────────────────────────────
-constexpr uint16_t MAX_MSG_SIZE = 512U;
+constexpr uint16_t MAX_MSG_SIZE = 1024U; // Increased to 1024 to handle larger JSON payloads
 
 WiFiClient          espClient;
 Arduino_MQTT_Client mqttClient(espClient);
@@ -36,7 +46,11 @@ const std::array<IAPI_Implementation *, 1U> apis = {&rpc};
 ThingsBoard tb(mqttClient, MAX_MSG_SIZE, MAX_MSG_SIZE, Default_Max_Stack_Size, apis);
 
 // ── Shared state ──────────────────────────────────────────────────────────────
-static volatile bool ledState          = false;
+static volatile bool ledCellingState   = false;
+static volatile bool nightLightState   = false;  // Biến ảo tắt/mở chung
+static volatile int  nightLightColor   = 0;      // 0-Red, 1-Green, 2-Blue
+static volatile int  fanSpeed          = 0;      // 0-off, 1-low, 2-medium, 3-high
+
 static volatile bool pendingAttrUpdate = false;
 static bool          subscribed        = false;
 
@@ -44,21 +58,50 @@ static bool          subscribed        = false;
 static QueueHandle_t ledQueue = nullptr;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RPC callback: setValue { "led": true/false }
+// RPC callback: setValue { "key": value, ... }
 // ─────────────────────────────────────────────────────────────────────────────
 void onSetValue(const JsonVariantConst &params, JsonDocument &response) {
-    if (!params.containsKey(LED_KEY)) {
-        Serial.println("[RPC] setValue: missing key 'led'");
-        response["error"] = "missing key 'led'";
+    bool hasUpdates = false;
+
+    // 1. led_celling
+    if (params.containsKey(LED_CELLING_KEY)) {
+        ledCellingState = params[LED_CELLING_KEY].as<bool>();
+        response[LED_CELLING_KEY] = ledCellingState;
+        hasUpdates = true;
+    }
+    
+    // 2. led_beside_night_light
+    if (params.containsKey(LED_NIGHT_KEY)) {
+        nightLightState = params[LED_NIGHT_KEY].as<bool>();
+        response[LED_NIGHT_KEY] = nightLightState;
+        hasUpdates = true;
+    }
+    
+    // 3. brightness_beside_night_light (RGB color)
+    if (params.containsKey(COLOR_NIGHT_KEY)) {
+        nightLightColor = params[COLOR_NIGHT_KEY].as<int>();
+        response[COLOR_NIGHT_KEY] = nightLightColor;
+        hasUpdates = true;
+    }
+
+    // 4. integer_fan_speed
+    if (params.containsKey(FAN_SPEED_KEY)) {
+        fanSpeed = params[FAN_SPEED_KEY].as<int>();
+        response[FAN_SPEED_KEY] = fanSpeed;
+        hasUpdates = true;
+    }
+
+    if (!hasUpdates) {
+        Serial.println("[RPC] setValue: missing target keys");
+        response["error"] = "missing target keys";
         return;
     }
-    bool newState     = params[LED_KEY].as<bool>();
-    ledState          = newState;
-    xQueueOverwrite(ledQueue, &newState);
-    Serial.printf("[RPC] setValue led = %s\n", newState ? "true" : "false");
+
+    bool dummy = true;
+    xQueueOverwrite(ledQueue, &dummy); // Signal hardware task to update states
     
-    // Gửi lại đúng giá trị json boolean để TB không bị lỗi Format Parsing
-    response[LED_KEY] = newState;
+    Serial.printf("[RPC] Received updates -> Cell:%d, Night:%d, Color:%d, Fan:%d\n", 
+            ledCellingState, nightLightState, nightLightColor, fanSpeed);
 }
 
 // Global scope for callbacks to ensure memory is retained
@@ -91,21 +134,62 @@ bool reconnect() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FreeRTOS Task: LED control – only touches GPIO, never calls tb  (Core 0)
+// FreeRTOS Task: Hardware control – only touches GPIO/Libraries (Core 0)
 // ─────────────────────────────────────────────────────────────────────────────
 void ledTask(void *pvParameters) {
-    pinMode(LED_PIN, OUTPUT);
-    digitalWrite(LED_PIN, LOW);
+    // 1. NeoPixel Init
+    pixels.begin();
+    pixels.clear();
+    pixels.show();
 
-    bool state = false;
+    // 2. LED Celling Init
+    pinMode(LED_CELLING_PIN, OUTPUT);
+    digitalWrite(LED_CELLING_PIN, LOW);
+
+    // 3. Fan Init (PWM)
+    // On ESP32, analogWrite is a wrapper for ledc/mcpwm or uses the standard ESP32 
+    // analogWrite implementation which works transparently.
+    pinMode(FAN_PIN, OUTPUT);
+    analogWrite(FAN_PIN, 0);
+
+    bool signal;
+    
     for (;;) {
-        if (xQueueReceive(ledQueue, &state, portMAX_DELAY) == pdTRUE) {
-            digitalWrite(LED_PIN, state ? HIGH : LOW);
-            Serial.printf("[LED] %s\n", state ? "ON" : "OFF");
+        // Block until a new RPC command arrives
+        if (xQueueReceive(ledQueue, &signal, portMAX_DELAY) == pdTRUE) {
             
-            // Xóa đi các lệnh delay vì nó làm gián đoạn chuỗi gửi response RPC về phía TB server
+            // 1. Cập nhật Đèn trần (Celling LED)
+            digitalWrite(LED_CELLING_PIN, ledCellingState ? HIGH : LOW);
             
-            // Báo cho loop() biết task đã bật/tắt xong -> gửi update lên ThingsBoard
+            // 2. Cập nhật Đèn ngủ (NeoPixel)
+            pixels.clear();
+            if (nightLightState) {
+                // Determine color based on index: 0-Red, 1-Green, 2-Blue
+                uint32_t color = pixels.Color(255, 255, 255); // Default to white
+                if (nightLightColor == 0)      color = pixels.Color(255, 0, 0); // Red
+                else if (nightLightColor == 1) color = pixels.Color(0, 255, 0); // Green
+                else if (nightLightColor == 2) color = pixels.Color(0, 0, 255); // Blue
+                
+                for(int p = 0; p < NUM_PIXELS; p++) {
+                    pixels.setPixelColor(p, color);
+                }
+            }
+            pixels.show(); // Apply new color immediately
+            
+            // 3. Cập nhật Bơm/Quạt (Fan) theo Speed (0-3)
+            int pwmVal = 0;
+            switch (fanSpeed) {
+                case 1: pwmVal = 85;  break; // Low
+                case 2: pwmVal = 170; break; // Medium
+                case 3: pwmVal = 255; break; // High
+                default: pwmVal = 0;  break; // Off
+            }
+            analogWrite(FAN_PIN, pwmVal);
+
+            Serial.printf("[HW] Applied -> Cell:%s, NeoPixel:%s, ColorIdx:%d, PWM:%d\n", 
+                          ledCellingState ? "ON" : "OFF", nightLightState ? "ON" : "OFF" , nightLightColor, pwmVal);
+            
+            // Báo cho tbTask biết -> gửi update lên ThingsBoard
             pendingAttrUpdate = true;
         }
     }
@@ -149,8 +233,24 @@ void tbTask(void *pvParameters) {
         // Send pending client attribute (triggered by RPC callback)
         if (pendingAttrUpdate) {
             pendingAttrUpdate = false;
-            tb.sendAttributeData(LED_KEY, (bool)ledState);
-            Serial.printf("[Attr] led = %s\n", ledState ? "true" : "false");
+            
+            // Build an array of all properties to dispatch them in batch
+            constexpr size_t ATTR_COUNT = 4U;
+            Attribute attributes[ATTR_COUNT] = {
+                { LED_CELLING_KEY, (bool)ledCellingState },
+                { LED_NIGHT_KEY,   (bool)nightLightState },
+                { COLOR_NIGHT_KEY, (int)nightLightColor  },
+                { FAN_SPEED_KEY,   (int)fanSpeed         }
+            };
+            
+            // Send mapping array directly to ThingsBoard using pointers
+            Telemetry* attrBegin = attributes;
+            Telemetry* attrEnd = attributes + ATTR_COUNT;
+            
+            // Add template parameter <ATTR_COUNT> to specify the memory size statically
+            tb.sendAttributes<ATTR_COUNT>(attrBegin, attrEnd);
+            
+            Serial.println("[TB] Shared attributes synchronized to server.");
         }
 
         tb.loop();
@@ -174,8 +274,12 @@ void setup() {
 
     InitWiFi();
 
-    // Kích hoạt cờ gửi trạng thái mặc định (false) lên ThingsBoard ngay lần đầu kết nối
-    pendingAttrUpdate = true;
+    // Khởi động bằng việc bắn ngay 1 tín hiệu vào Queue để phần cứng tự động
+    // Set chân mức 0, cập nhật LED RGB về tắt, Fan về 0
+    // Và sau đó Hardware task sẽ tự động bật cờ `pendingAttrUpdate = true;` 
+    // để TbTask kéo TẤT CẢ 4 biến lên Server lúc boot
+    bool bootDummy = true;
+    xQueueOverwrite(ledQueue, &bootDummy);
 
     // tbTask on Core 1 for MQTT handling
     xTaskCreatePinnedToCore(tbTask, "tb_task", 4096, nullptr, 1, nullptr, 1);

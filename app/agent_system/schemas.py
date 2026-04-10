@@ -42,6 +42,27 @@ class UserIntent(BaseModel):
     )
 
 
+class SensorAction(BaseModel):
+    """One sensor function within a device, containing multiple attributes."""
+    sensor_name: str
+    shared_attributes: Dict[str, Any]
+
+    def __init__(self, **data):
+        if "shared_attribute" in data and "shared_attributes" not in data:
+            data["shared_attributes"] = data.pop("shared_attribute")
+        
+        shared_attrs = data.get("shared_attributes")
+        if isinstance(shared_attrs, list):
+            new_attrs = {}
+            for item in shared_attrs:
+                if isinstance(item, dict) and "name_key" in item and "value" in item:
+                    new_attrs[item["name_key"]] = item["value"]
+                elif isinstance(item, dict) and len(item) == 1:
+                    new_attrs.update(item)
+            data["shared_attributes"] = new_attrs
+
+        super().__init__(**data)
+
 class DeviceAction(BaseModel):
     """
     One device to act on, as selected by the Retriever step.
@@ -50,9 +71,7 @@ class DeviceAction(BaseModel):
         name_device   — human-readable device name from YAML
         token         — CoreIoT device token (NEVER invented — copied from YAML)
         room          — room name from YAML
-        shared_attribute — key:value pairs where:
-            value = True/False  → control (set attribute)
-            value = None        → read (query current state)
+        sensors       — List of sensors and their requested shared_attributes
     """
 
     name_device: str
@@ -66,10 +85,10 @@ class DeviceAction(BaseModel):
         default=None,
         description="Device category from YAML e.g. 'smart_light', 'smart_fan'.",
     )
-    shared_attribute: Dict[str, Any] = Field(
+    sensors: List[SensorAction] = Field(
         description=(
-            "E.g. {'led': True} to turn on, {'led': False} to turn off, "
-            "{'led': None} to read current value, {'brightness': 80} to set level."
+            "List of sensors (e.g. led_celling, fan) and their shared_attributes to act on. "
+            "All attributes for a chosen sensor should be included."
         )
     )
 

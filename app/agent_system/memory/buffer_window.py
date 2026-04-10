@@ -11,7 +11,7 @@ Implements the architecture diagram's "Buffer Window Memory" node:
 It is a per-session FIFO sliding window of the last *N* successful device
 actions (reads or writes). The Slave Agent consults it before asking the
 user for clarification, and the iot_action_agent appends to it after a
-successful ``post_shared_attribute`` so the next turn can short-circuit if
+successful ``post_shared_attributes`` so the next turn can short-circuit if
 the user references the same device or room.
 
 The window lives entirely in process memory — it does NOT survive a server
@@ -57,7 +57,7 @@ class ActionRecord:
     token: str
     action: str  # "post" | "read"
     type_device: str = ""  # e.g. "smart_light", "smart_fan"
-    shared_attribute: dict[str, Any] = field(default_factory=dict)
+    shared_attributes: dict[str, Any] = field(default_factory=dict)
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def to_dict(self) -> dict[str, Any]:
@@ -67,7 +67,7 @@ class ActionRecord:
             "token": self.token,
             "action": self.action,
             "type_device": self.type_device,
-            "shared_attribute": self.shared_attribute,
+            "shared_attributes": self.shared_attributes,
             "timestamp": self.timestamp.isoformat(),
         }
 
@@ -143,7 +143,7 @@ class BufferWindowMemory:
             lines.append(
                 f"- [{ts}] {record.action} {record.device_name} "
                 f"(room={record.room}, token={record.token}, "
-                f"attrs={record.shared_attribute})"
+                f"attrs={record.shared_attributes})"
             )
         return "\n".join(lines)
 

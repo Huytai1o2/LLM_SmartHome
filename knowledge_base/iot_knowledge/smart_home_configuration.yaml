@@ -1,56 +1,31 @@
 rooms:
   - name: living_room
     type_device:
-      - name_type: smart_light
+      - name_type: smart_light_fan
         devices:
-        - name: Đèn trần
+        - name: Celling_fan_bedside_night_light
           device_token: xdF2nW4aR9SAdqqPiym0
           device_id: fcceeaa0-3111-11f1-9981-cffbb69f5b14
-          description_location: the ceiling of the living room
-          shared_attributes:
-            - name_key: led
-              value: boolean
-              description: Indicates whether the LED light is on or off
-
-        - name: Đèn ngủ
-          device_token: a1b2c3d4e5f6g7h8i9j0
-          device_id: your-device-uuid-here
-          description_location: the bedside table in the living room
-          shared_attributes:
-            - name_key: brightness
-              value: integer
-              description: Represents the brightness level of the night light (0-100)
-            - name_key: led
-              value: boolean
-              description: Indicates whether the LED light is on or off
-      
-      - name_type: smart_fan
-        devices:
-          - name: quạt trần
-            device_token: z9y8x7w6v5u4t3s2r1q0
-            device_id: your-device-uuid-here
-            description_location: the ceiling of the living room
-            shared_attributes:
-              - name_key: speed
-                value: integer
-                description: Represents the speed level of the fan (0-3)
-              - name_key: toogle
-                value: boolean
-                description: Indicates whether the fan is on or off
-
-      - name_type: smart_thermostat
-        devices:
-          - name: điều hòa
-            device_token: m1n2o3p4q5r6s7t8u9v0
-            device_id: your-device-uuid-here
-            description_location: the wall of the living room
-            shared_attributes:
-              - name_key: temperature
-                value: integer
-                description: Represents the temperature setting of the thermostat (in degrees Celsius)
-              - name_key: mode
-                value: string
-                description: Represents the mode of the thermostat (e.g., "cool", "heat", "auto")
+          description_location: the ceiling led, fan and night light of the living room
+          sensors:
+            - sensor_name: led_celling
+              shared_attributes:
+                - name_key: led_celling
+                  value: boolean
+                  description: Indicates whether the LED light is ON or OFF
+            - sensor_name: brightness_beside_night_light
+              shared_attributes:
+                - name_key: led_beside_night_light
+                  value: boolean
+                  description: Indicates whether the LED light is ON or OFF
+                - name_key: brightness_beside_night_light
+                  value: integer
+                  description: Represents the colour RGB brightness of the night light (0-Red, 1- Green, 2- Blue)
+            - sensor_name: fan
+              shared_attributes:
+                - name_key: integer_fan_speed
+                  value: integer
+                  description: Represents the speed level of the fan zero is OFF/FALSE, three is ON/TRUE (0-off, 1-low, 2-medium, 3-high)
 
   - name: kitchen
     type_device:
@@ -61,22 +36,9 @@ rooms:
             device_id: your-device-uuid-here
             type: smart_fan
             description_location: the ceiling of the kitchen
-            shared_attributes:
-              - name_key: speed
-                value: integer
-                description: Represents the speed level of the fan (0-3)
-              - name_key: toogle
-                value: boolean
-                description: Indicates whether the fan is on or off
-
-      - name_type: smart_light
-        devices:
-        - name: đèn bếp
-          device_token: k1l2m3n4o5p6q7r8s9t0
-          device_id: your-device-uuid-here
-          type: smart_light
-          description_location: the ceiling of the kitchen
-          shared_attributes:
-            - name_key: led
-              value: boolean
-              description: Indicates whether the LED light is on or off
+            sensors:
+              - sensor_name: fan
+                shared_attributes:
+                  - name_key: integer_fan_speed
+                    value: integer
+                    description: Represents the speed level of the fan zero is OFF/FALSE, three is ON/TRUE (0-off, 1-low, 2-medium, 3-high)

@@ -14,8 +14,8 @@ echo "🔄 Step 2: Running Database Migration (Alembic)..."
 source .IotAgent_venv/bin/activate
 alembic upgrade head
 
-echo "⚙️ Step 3: Starting Backend Web (FastAPI)..."
-uvicorn app.main:app --host 0.0.0.0 --port 8000 &
+echo "⚙️ Step 3: Starting Backend Web (FastAPI) with DEBUG logs..."
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level debug &
 BACKEND_PID=$!
 
 echo "🌐 Step 4: Starting Frontend Web (Next.js)..."

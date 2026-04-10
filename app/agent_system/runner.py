@@ -97,6 +97,7 @@ async def stream_response(
             final_text = run_iot_pipeline(
                 user_message=message,
                 history=history,
+                session_id=sid,
                 on_step=on_step,
             )
 

@@ -21,7 +21,7 @@ class CheckBufferWindowTool(Tool):
     description = (
         "Look up recent device actions in the current session's Buffer Window Memory. "
         "Returns a JSON list of matching ActionRecords (device_name, room, token, "
-        "action, shared_attribute, timestamp). Returns '[]' on a cache miss. "
+        "action, shared_attributes, timestamp). Returns '[]' on a cache miss. "
         "Use this FIRST when the user's request is ambiguous about room or device — "
         "if a hit is found, the missing context can be inferred without asking the user."
     )

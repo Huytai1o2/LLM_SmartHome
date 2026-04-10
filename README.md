@@ -54,8 +54,8 @@ User (HTTP / SSE)
 2. **Check buffer** — `check_buffer_window()` looks up recently-used devices
 3. **Clarify** — if info still missing, delegate to `clarification_agent` → return question to user
 4. **Iterate YAML** — `iterate_smart_home_yaml(room_name, type_device)` fetches matching device config
-5. **Select device** — `retriever_agent` parses the YAML and returns `[{name_device, token, room, shared_attribute}]`
-6. **Execute** — `iot_action_agent` calls `post_shared_attribute` (write) or `read_shared_attribute` (read)
+5. **Select device** — `retriever_agent` parses the YAML and returns `[{name_device, token, room, shared_attributes}]`
+6. **Execute** — `iot_action_agent` calls `post_shared_attributes` (write) or `read_shared_attributes` (read)
 7. **Update buffer** — successful writes are recorded in `BufferWindowMemory` (per-session FIFO)
 8. **Reply** — Vietnamese/English summary returned to user
 

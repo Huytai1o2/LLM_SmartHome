@@ -1,7 +1,7 @@
 """smolagents Tool wrappers around the CoreIoT helpers in ``thingsboard_api``.
 
-These wrappers let an agent call ``read_shared_attribute`` and
-``post_shared_attribute`` as named tools (e.g. from a ToolCallingAgent's JSON
+These wrappers let an agent call ``read_shared_attributes`` and
+``post_shared_attributes`` as named tools (e.g. from a ToolCallingAgent's JSON
 tool call). The CodeAgent can also import the underlying functions directly
 from ``app.agent_system.tools.thingsboard_api`` and use them inside generated
 Python code without going through the tool wrapper — both paths are
@@ -23,7 +23,7 @@ Example payload (passed as a JSON string)::
             "name_device": "Đèn trần",
             "token":       "xdF2nW4aR9SAdqqPiym0",
             "room":        "living_room",
-            "shared_attribute": {"led": true}
+            "shared_attributes": {"led": true}
         }
     ]
 
@@ -40,8 +40,8 @@ from typing import Any
 from smolagents import Tool
 
 from app.agent_system.tools.thingsboard_api import (
-    post_shared_attribute,
-    read_shared_attribute,
+    post_shared_attributes,
+    read_shared_attributes,
 )
 from app.agent_system.memory.buffer_window import ActionRecord, get_current_buffer
 
@@ -73,7 +73,7 @@ def _parse_devices(devices_json: str | list[dict[str, Any]]) -> list[dict[str, A
 
 
 class ReadSharedAttributeTool(Tool):
-    name = "read_shared_attribute"
+    name = "read_shared_attributes"
     description = (
         "Read the current CLIENT attributes for one or more CoreIoT devices "
         "via GET /api/v1/{deviceToken}/attributes?clientKeys=... "
@@ -81,7 +81,7 @@ class ReadSharedAttributeTool(Tool):
         "The firmware publishes state as client attributes via sendAttributeData. "
         "The `devices` argument is a JSON string encoding a list of device dicts. "
         'Each dict must have at least {"token": "<deviceToken>"} and may include '
-        '"name_device", "room", and "shared_attribute" (dict whose KEYS are the '
+        '"name_device", "room", and "shared_attributes" (dict whose KEYS are the '
         'client attribute names to read, e.g. {"led": null}). '
         "Returns a JSON string with one entry per device containing the "
         "`shared` dict (current state), the HTTP `status`, and any `error`."
@@ -91,7 +91,7 @@ class ReadSharedAttributeTool(Tool):
             "type": "string",
             "description": (
                 "JSON-encoded list of device dicts to read. Each entry needs a "
-                '"token" plus an optional "shared_attribute" dict whose keys are '
+                '"token" plus an optional "shared_attributes" dict whose keys are '
                 "the attributes to read."
             ),
         },
@@ -103,7 +103,7 @@ class ReadSharedAttributeTool(Tool):
             device_list = _parse_devices(devices)
         except ValueError as exc:
             return json.dumps({"error": str(exc)})
-        results = read_shared_attribute(device_list)
+        results = read_shared_attributes(device_list)
         return json.dumps(results, ensure_ascii=False, default=str)
 
 
@@ -113,7 +113,7 @@ class ReadSharedAttributeTool(Tool):
 
 
 class PostSharedAttributeTool(Tool):
-    name = "post_shared_attribute"
+    name = "post_shared_attributes"
     description = (
         "Write shared attributes to CoreIoT to control devices. "
         "Use this for CONTROL COMMANDS (turn light on/off, set fan speed, etc.). "
@@ -121,7 +121,7 @@ class PostSharedAttributeTool(Tool):
         "CoreIoT pushes the new value to the device via MQTT. "
         "Calling twice with the same value is a no-op (diff check). "
         "The `devices` argument is a JSON string encoding a list of device dicts. "
-        'Each dict must have {"token": "<deviceToken>", "shared_attribute": {"led": true/false}} '
+        'Each dict must have {"token": "<deviceToken>", "shared_attributes": {"led": true/false}} '
         'and may include "name_device" and "room" for logging. '
         "Returns a JSON string with one entry per device containing `before`, `after`, "
         "`posted`, the HTTP `status`, and any `error`."
@@ -131,7 +131,7 @@ class PostSharedAttributeTool(Tool):
             "type": "string",
             "description": (
                 "JSON-encoded list of device dicts to update. Each entry needs a "
-                '"token" and a "shared_attribute" dict mapping attribute names to '
+                '"token" and a "shared_attributes" dict mapping attribute names to '
                 'their desired values, e.g. {"led": true, "brightness": 80}.'
             ),
         },
@@ -143,7 +143,7 @@ class PostSharedAttributeTool(Tool):
             device_list = _parse_devices(devices)
         except ValueError as exc:
             return json.dumps({"error": str(exc)})
-        results = post_shared_attribute(device_list)
+        results = post_shared_attributes(device_list)
 
         # Append successful POSTs to the per-session BufferWindowMemory.
         buffer = get_current_buffer()
@@ -157,20 +157,20 @@ class PostSharedAttributeTool(Tool):
                             token=device.get("token") or "",
                             action="post",
                             type_device=device.get("type_device") or "",
-                            shared_attribute=device.get("shared_attribute") or {},
+                            shared_attributes=device.get("shared_attributes") or {},
                         )
                     )
 
         return json.dumps(results, ensure_ascii=False, default=str)
 
 
-read_shared_attribute_tool = ReadSharedAttributeTool()
-post_shared_attribute_tool = PostSharedAttributeTool()
+read_shared_attributes_tool = ReadSharedAttributeTool()
+post_shared_attributes_tool = PostSharedAttributeTool()
 
 
 __all__ = [
     "ReadSharedAttributeTool",
     "PostSharedAttributeTool",
-    "read_shared_attribute_tool",
-    "post_shared_attribute_tool",
+    "read_shared_attributes_tool",
+    "post_shared_attributes_tool",
 ]

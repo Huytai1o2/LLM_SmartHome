@@ -1,39 +1,7 @@
 """VectorStore-Backed Conversation Memory.
 
 Uses LangChain's ``VectorStoreRetrieverMemory`` to asynchronously embed and
-persist conversation history in a dedicated FAISS vector store. This lets the
-retriever agent query semantically similar past exchanges when answering a new
-question.
-
-Architecture role: "Async embedding — conversation history" in the RAG store.
-
-How it works
-------------
-1. After every chat turn the caller runs ``async_save_conversation()``.
-2. That coroutine delegates the heavy embedding work to a thread-pool executor
-   so the FastAPI event loop is never blocked.
-3. The background thread calls ``VectorStoreRetrieverMemory.save_context()``,
-   which embeds the turn and adds it to the FAISS index.
-4. The updated index is flushed to ``CONVERSATION_MEMORY_PATH`` on disk so it
-   survives restarts.
-5. At retrieval time, ``load_conversation_context()`` calls
-   ``memory.load_memory_variables()`` which does a similarity search and
-   returns the *k* most relevant past turns as formatted text.
-
-Typical usage
--------------
-    # In chat router — after every turn:
-    from app.vectore_store.conversation_memory import async_save_conversation
-
-    await async_save_conversation(
-        inputs={"input": user_message},
-        outputs={"output": assistant_reply},
-    )
-
-    # In retrieval tool:
-    from app.vectore_store.conversation_memory import load_conversation_context
-
-    context = load_conversation_context(query="What temperature did I set last time?")
+persist conversation history in a dedicated FAISS vector store per session.
 """
 
 from __future__ import annotations
@@ -55,39 +23,31 @@ CONVERSATION_MEMORY_PATH: str = os.environ.get(
     "CONVERSATION_MEMORY_PATH", "faiss_index/conversation_memory"
 )
 
-# Module-level singletons (lazy-initialised)
-_memory_store: FAISS | None = None
-_memory: VectorStoreRetrieverMemory | None = None
+# Module-level dictionary to hold store per session_id
+_memory_stores: dict[str, FAISS] = {}
+_memories: dict[str, VectorStoreRetrieverMemory] = {}
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-
-def _get_or_create_store() -> FAISS:
-    """Return the FAISS store for conversation history (lazy singleton)."""
-    global _memory_store
-
-    if _memory_store is not None:
-        return _memory_store
+def _get_or_create_store(session_id: str) -> FAISS:
+    """Return the FAISS store for conversation history per session_id."""
+    if session_id in _memory_stores:
+        return _memory_stores[session_id]
 
     embeddings = get_embeddings()
-    index_file = os.path.join(CONVERSATION_MEMORY_PATH, "index.faiss")
+    session_path = os.path.join(CONVERSATION_MEMORY_PATH, session_id)
+    index_file = os.path.join(session_path, "index.faiss")
 
     if os.path.isfile(index_file):
-        logger.info(
-            "Loading conversation memory store from '%s'.", CONVERSATION_MEMORY_PATH
-        )
-        _memory_store = FAISS.load_local(
-            CONVERSATION_MEMORY_PATH,
+        logger.info(f"Loading conversation memory store for session {session_id}.")
+        store = FAISS.load_local(
+            session_path,
             embeddings=embeddings,
             allow_dangerous_deserialization=True,
         )
+        _memory_stores[session_id] = store
     else:
-        logger.info("Initialising new in-memory conversation history store.")
-        # Bootstrap with a single placeholder document so the store is valid
-        _memory_store = FAISS.from_documents(
+        logger.info(f"Initialising new in-memory history store for {session_id}.")
+        store = FAISS.from_documents(
             [
                 Document(
                     page_content="Conversation history store initialised.",
@@ -96,101 +56,59 @@ def _get_or_create_store() -> FAISS:
             ],
             embedding=embeddings,
         )
+        _memory_stores[session_id] = store
 
-    return _memory_store
+    return _memory_stores[session_id]
 
 
-def get_conversation_memory() -> VectorStoreRetrieverMemory:
-    """Return the shared ``VectorStoreRetrieverMemory`` (lazy singleton)."""
-    global _memory
+def get_conversation_memory(session_id: str) -> VectorStoreRetrieverMemory:
+    """Return the shared VectorStoreRetrieverMemory per session."""
+    if session_id in _memories:
+        return _memories[session_id]
 
-    if _memory is not None:
-        return _memory
-
-    store = _get_or_create_store()
+    store = _get_or_create_store(session_id)
     retriever = store.as_retriever(search_kwargs={"k": 5})
-    _memory = VectorStoreRetrieverMemory(
+    memory = VectorStoreRetrieverMemory(
         retriever=retriever,
         memory_key="conversation_history",
         return_docs=False,
     )
-    return _memory
-
-
-# ---------------------------------------------------------------------------
-# Sync / async save
-# ---------------------------------------------------------------------------
+    _memories[session_id] = memory
+    return memory
 
 
 def _sync_save_conversation(
     inputs: Dict[str, Any],
     outputs: Dict[str, str],
+    session_id: str,
 ) -> None:
-    """Embed one conversation turn and persist the updated index to disk."""
     try:
-        memory = get_conversation_memory()
+        memory = get_conversation_memory(session_id)
         memory.save_context(inputs, outputs)
 
-        # Persist the updated index so it survives restarts
-        store = _get_or_create_store()
-        os.makedirs(CONVERSATION_MEMORY_PATH, exist_ok=True)
-        store.save_local(CONVERSATION_MEMORY_PATH)
-        logger.debug(
-            "Conversation turn embedded and saved to '%s'.", CONVERSATION_MEMORY_PATH
-        )
+        store = _get_or_create_store(session_id)
+        session_path = os.path.join(CONVERSATION_MEMORY_PATH, session_id)
+        os.makedirs(session_path, exist_ok=True)
+        store.save_local(session_path)
     except Exception as exc:
-        # Non-fatal: log and continue so a memory failure never breaks the chat
-        logger.error("Failed to save conversation turn to memory store: %s", exc)
+        logger.error(f"Failed to save conversation turn: {exc}")
 
 
 async def async_save_conversation(
     inputs: Dict[str, Any],
     outputs: Dict[str, str],
+    session_id: str,
 ) -> None:
-    """
-    Asynchronously embed a conversation turn in the background.
-
-    The embedding call is offloaded to the default thread-pool executor so the
-    FastAPI event loop is never blocked while waiting for the model inference.
-
-    Parameters
-    ----------
-    inputs:
-        Dict with at least ``{"input": "<user message>"}`` — the format expected
-        by ``VectorStoreRetrieverMemory.save_context()``.
-    outputs:
-        Dict with at least ``{"output": "<assistant reply>"}`` — the
-        complementary output side of the conversation turn.
-    """
     loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, _sync_save_conversation, inputs, outputs)
+    await loop.run_in_executor(None, _sync_save_conversation, inputs, outputs, session_id)
 
 
-# ---------------------------------------------------------------------------
-# Retrieval helper
-# ---------------------------------------------------------------------------
-
-
-def load_conversation_context(query: str) -> str:
-    """
-    Retrieve the most semantically relevant past conversation turns for *query*.
-
-    Parameters
-    ----------
-    query:
-        The current user input to match against stored conversation history.
-
-    Returns
-    -------
-    str
-        Formatted string containing up to *k* relevant past conversation turns,
-        or a message indicating no history is available.
-    """
-    memory = get_conversation_memory()
+def load_conversation_context(query: str, session_id: str) -> str:
+    memory = get_conversation_memory(session_id)
     variables = memory.load_memory_variables({"prompt": query})
     history: str = variables.get("conversation_history", "")
 
-    if not history or history.strip() == "Conversation history store initialised.":
+    if not history or "Conversation history store initialised" in history:
         return "No relevant conversation history found."
 
     return f"Relevant past conversations:\n{history}"

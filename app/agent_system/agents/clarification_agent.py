@@ -12,18 +12,8 @@ import json
 import re
 
 from app.agent_system.tools.buffer_window_tools import check_buffer_window_tool
-from app.agent_system.tools.yaml_iterator import iterate_smart_home_yaml_tool, list_available_rooms, get_device_keyword_mapping
-
-
-def _infer_device_type(user_message: str) -> str | None:
-    msg = user_message.lower()
-    device_type_map = get_device_keyword_mapping()
-    
-    # Sort keys by length descending to match longest phrase first ("đèn trần" before "đèn")
-    for keyword in sorted(device_type_map.keys(), key=len, reverse=True):
-        if keyword in msg:
-            return device_type_map[keyword]
-    return None
+from app.agent_system.memory.buffer_window import get_current_buffer
+from app.agent_system.tools.yaml_iterator import iterate_smart_home_yaml_tool, list_available_rooms, get_room_and_device_types
 
 
 class ClarificationAgent:
@@ -42,20 +32,23 @@ class ClarificationAgent:
             except (json.JSONDecodeError, IndexError, KeyError):
                 pass
                 
-        # Try inferring device type from user message explicitly
-        device_type = _infer_device_type(user_message)
-        
-        # Merge with extracted intent if passed
+        # Use extracted intent directly
         has_room = False
+        device_type = None
         if extracted_intent:
             has_room = bool(extracted_intent.room_name)
-            if not device_type:
-                device_type = extracted_intent.type_device
+            device_type = extracted_intent.type_device
 
-        # If LLM failed but we know from regex it's "all"
+        # If LLM extracted "all"
         if device_type == "all" and has_room:
-            # We magically caught it. Tell Orchestrator to proceed (we shouldn't be here, but just in case)
             pass
+
+        # Build suggestions from Buffer Window
+        suggestion_msg = ""
+        buf = get_current_buffer()
+        if buf and buf.all():
+            recent = buf.all()[-1] # the most recent action
+            suggestion_msg = f" Hay là bạn muốn điều khiển '{recent.device_name}' ở '{recent.room}' như trước đó?"
 
         # Step 2 — Missing Room
         if not has_room:
@@ -71,11 +64,21 @@ class ClarificationAgent:
                 room_names = [r for r in room_names if r in rooms]
             
             room_list = ", ".join(room_names) if room_names else "không rõ"
-            return f"Bạn muốn điều khiển ở phòng nào? Các phòng hiện có: {room_list}."
+            return f"Bạn muốn điều khiển ở phòng nào? Các phòng hiện có: {room_list}.{suggestion_msg}"
             
         # Step 3 - Missing Device
         if not device_type:
-            return "Bạn muốn điều khiển thiết bị nào? (ví dụ: đèn, quạt, hoặc 'tất cả thiết bị')"
+            # Build a string like: phòng khách (smart_light, smart_fan), phòng bếp (smart_fan)
+            room_to_types = get_room_and_device_types()
+            details = []
+            for r, t_list in room_to_types.items():
+                if has_room and extracted_intent and r != extracted_intent.room_name and r not in (extracted_intent.room_name or []):
+                    continue
+                types_str = ", ".join(t_list)
+                details.append(f"{r} ({types_str})")
+                
+            avail_str = "; ".join(details) if details else "không rõ"
+            return f"Bạn muốn điều khiển thiết bị nào? (Các thiết bị hiện có: {avail_str} hoặc 'tất cả thiết bị').{suggestion_msg}"
             
         return "Bạn hãy cung cấp rõ hơn thông tin thiết bị hoặc phòng nhé."
 

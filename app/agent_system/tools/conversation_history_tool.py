@@ -32,8 +32,11 @@ class ConversationHistoryTool(Tool):
     output_type = "string"
 
     def forward(self, query: str) -> str:
+        from app.agent_system.memory.buffer_window import get_current_buffer
         assert isinstance(query, str), "Your search query must be a string"
-        return load_conversation_context(query)
+        buf = get_current_buffer()
+        session_id = buf.session_id if buf else "default"
+        return load_conversation_context(query, session_id)
 
 
 conversation_history_tool = ConversationHistoryTool()

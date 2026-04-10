@@ -132,6 +132,7 @@ async def chat_stream(body: ChatRequest):
                 await async_save_conversation(
                     inputs={"input": body.message},
                     outputs={"output": full_reply},
+                    session_id=str(session_id),
                 )
 
                 # 7. Signal completion

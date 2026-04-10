@@ -174,6 +174,40 @@ def list_available_type_devices(
     return types
 
 
+def get_room_and_device_types(yaml_path: str = DEFAULT_YAML_PATH) -> dict[str, list[str]]:
+    """Return a mapping of room name to its list of name_type values."""
+    data = _load_yaml(yaml_path)
+    mapping: dict[str, list[str]] = {}
+    for room in data.get("rooms", []):
+        r_name = str(room.get("name", ""))
+        if not r_name:
+            continue
+        mapping[r_name] = []
+        for td in room.get("type_device", []) or []:
+            name_type = td.get("name_type")
+            if name_type and str(name_type) not in mapping[r_name]:
+                mapping[r_name].append(str(name_type))
+    return mapping
+
+
+def get_device_summary(yaml_path: str = DEFAULT_YAML_PATH) -> str:
+    """Return a string summarizing rooms, device types, names, and descriptions."""
+    data = _load_yaml(yaml_path)
+    lines = []
+    for room in data.get("rooms", []):
+        r_name = str(room.get("name", "unknown"))
+        lines.append(f"Room: {r_name}")
+        for td in room.get("type_device", []) or []:
+            t_name = str(td.get("name_type", "unknown"))
+            lines.append(f"  Type: {t_name}")
+            for dev in td.get("devices", []) or []:
+                d_name = str(dev.get("name", "unknown"))
+                d_desc = str(dev.get("description_location", ""))
+                desc_str = f" ({d_desc})" if d_desc else ""
+                lines.append(f"    - Device: {d_name}{desc_str}")
+    return "\n".join(lines)
+
+
 def get_device_keyword_mapping(yaml_path: str = DEFAULT_YAML_PATH) -> dict[str, str]:
     """Dynamically generate a mapping of device keywords to their type_device.
     E.g. 'đèn trần' -> 'smart_light', 'quạt' -> 'smart_fan'.
@@ -280,6 +314,8 @@ __all__ = [
     "iterate_smart_home_yaml",
     "list_available_rooms",
     "list_available_type_devices",
+    "get_room_and_device_types",
+    "get_device_summary",
     "get_device_keyword_mapping",
     "reload_yaml_cache",
     "IterateSmartHomeYamlTool",

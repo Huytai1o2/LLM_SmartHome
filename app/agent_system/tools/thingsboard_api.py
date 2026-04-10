@@ -92,15 +92,15 @@ def _invalidate_jwt() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _extract_keys(shared_attribute: Any) -> list[str]:
+def _extract_keys(shared_attributes: Any) -> list[str]:
     """Extract attribute key names from a flexible input (dict, list, or scalar)."""
-    if shared_attribute is None:
+    if shared_attributes is None:
         return []
-    if isinstance(shared_attribute, dict):
-        return [str(k) for k in shared_attribute.keys()]
-    if isinstance(shared_attribute, (list, tuple, set)):
-        return [str(k) for k in shared_attribute]
-    return [str(shared_attribute)]
+    if isinstance(shared_attributes, dict):
+        return [str(k) for k in shared_attributes.keys()]
+    if isinstance(shared_attributes, (list, tuple, set)):
+        return [str(k) for k in shared_attributes]
+    return [str(shared_attributes)]
 
 
 def _get_client_attributes(
@@ -166,7 +166,7 @@ def _call_rpc(
 # ---------------------------------------------------------------------------
 
 
-def read_shared_attribute(devices: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def read_shared_attributes(devices: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Read current client attributes from CoreIoT for each device.
 
     Uses GET /api/v1/{token}/attributes?clientKeys=<keys>.
@@ -205,37 +205,37 @@ def read_shared_attribute(devices: list[dict[str, Any]]) -> list[dict[str, Any]]
                 results.append(entry)
                 continue
 
-            keys = _extract_keys(device.get("shared_attribute"))
+            keys = _extract_keys(device.get("shared_attributes"))
             try:
                 entry["shared"] = _get_client_attributes(client, token, keys)
                 entry["status"] = 200
                 logger.debug(
-                    "read_shared_attribute OK: %s (%s) keys=%s → %s",
+                    "read_shared_attributes OK: %s (%s) keys=%s → %s",
                     device.get("name_device"), token, keys, entry["shared"],
                 )
             except httpx.HTTPStatusError as exc:
                 entry["status"] = exc.response.status_code
                 entry["error"] = f"HTTP {exc.response.status_code}: {exc.response.text}"
                 logger.warning(
-                    "read_shared_attribute HTTP error: device=%s status=%s body=%s",
+                    "read_shared_attributes HTTP error: device=%s status=%s body=%s",
                     device.get("name_device"), exc.response.status_code, exc.response.text,
                 )
             except httpx.TimeoutException:
                 entry["error"] = f"Timeout ({HTTP_TIMEOUT_SECONDS}s)"
                 logger.warning(
-                    "read_shared_attribute timeout: device=%s token=%s",
+                    "read_shared_attributes timeout: device=%s token=%s",
                     device.get("name_device"), token,
                 )
             except httpx.RequestError as exc:
                 entry["error"] = f"Could not reach CoreIoT at {COREIOT_API_BASE}: {exc}"
                 logger.warning(
-                    "read_shared_attribute network error: device=%s error=%s",
+                    "read_shared_attributes network error: device=%s error=%s",
                     device.get("name_device"), exc,
                 )
             except Exception as exc:  # noqa: BLE001
                 entry["error"] = f"Unexpected error: {exc}"
                 logger.exception(
-                    "read_shared_attribute unexpected error: device=%s token=%s",
+                    "read_shared_attributes unexpected error: device=%s token=%s",
                     device.get("name_device"), token,
                 )
 
@@ -244,7 +244,7 @@ def read_shared_attribute(devices: list[dict[str, Any]]) -> list[dict[str, Any]]
     return results
 
 
-def post_shared_attribute(devices: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def post_shared_attributes(devices: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Control devices via Server-Side RPC, with a client-attribute diff check.
 
     Steps per device:
@@ -296,7 +296,7 @@ def post_shared_attribute(devices: list[dict[str, Any]]) -> list[dict[str, Any]]
         for device in devices:
             token = device.get("token")
             device_id = device.get("device_id")
-            desired: dict[str, Any] = device.get("shared_attribute") or {}
+            desired: dict[str, Any] = device.get("shared_attributes") or {}
             entry: dict[str, Any] = {
                 "name_device": device.get("name_device"),
                 "token": token,
@@ -316,7 +316,7 @@ def post_shared_attribute(devices: list[dict[str, Any]]) -> list[dict[str, Any]]
                 results.append(entry)
                 continue
             if not isinstance(desired, dict) or not desired:
-                entry["error"] = "Missing or invalid 'shared_attribute' — nothing to send."
+                entry["error"] = "Missing or invalid 'shared_attributes' — nothing to send."
                 results.append(entry)
                 continue
 
@@ -325,7 +325,7 @@ def post_shared_attribute(devices: list[dict[str, Any]]) -> list[dict[str, Any]]
                 current = _get_client_attributes(client, token, list(desired.keys()))
                 entry["before"] = current
                 logger.debug(
-                    "post_shared_attribute GET: device=%s current=%s",
+                    "post_shared_attributes GET: device=%s current=%s",
                     device.get("name_device"), current,
                 )
 
@@ -336,7 +336,7 @@ def post_shared_attribute(devices: list[dict[str, Any]]) -> list[dict[str, Any]]
                     entry["status"] = 200
                     entry["posted"] = False
                     logger.debug(
-                        "post_shared_attribute SKIP (no diff): device=%s desired=%s current=%s",
+                        "post_shared_attributes SKIP (no diff): device=%s desired=%s current=%s",
                         device.get("name_device"), desired, current,
                     )
                     results.append(entry)
@@ -344,7 +344,7 @@ def post_shared_attribute(devices: list[dict[str, Any]]) -> list[dict[str, Any]]
 
                 # Step 3 — Server-Side RPC setValue
                 logger.debug(
-                    "post_shared_attribute RPC: device=%s device_id=%s method=setValue params=%s",
+                    "post_shared_attributes RPC: device=%s device_id=%s method=setValue params=%s",
                     device.get("name_device"), device_id, diff,
                 )
                 status_code, rpc_resp = _call_rpc(client, jwt, device_id, "setValue", diff)
@@ -356,7 +356,7 @@ def post_shared_attribute(devices: list[dict[str, Any]]) -> list[dict[str, Any]]
                 entry["status"] = status_code
                 entry["posted"] = True
                 logger.info(
-                    "post_shared_attribute RPC OK: device=%s diff=%s response=%s",
+                    "post_shared_attributes RPC OK: device=%s diff=%s response=%s",
                     device.get("name_device"), diff, rpc_resp,
                 )
 
@@ -366,25 +366,25 @@ def post_shared_attribute(devices: list[dict[str, Any]]) -> list[dict[str, Any]]
                 entry["status"] = exc.response.status_code
                 entry["error"] = f"HTTP {exc.response.status_code}: {exc.response.text}"
                 logger.warning(
-                    "post_shared_attribute HTTP error: device=%s status=%s body=%s",
+                    "post_shared_attributes HTTP error: device=%s status=%s body=%s",
                     device.get("name_device"), exc.response.status_code, exc.response.text,
                 )
             except httpx.TimeoutException:
                 entry["error"] = f"RPC timeout ({RPC_TIMEOUT_SECONDS}s) — device may be offline."
                 logger.warning(
-                    "post_shared_attribute RPC timeout: device=%s device_id=%s",
+                    "post_shared_attributes RPC timeout: device=%s device_id=%s",
                     device.get("name_device"), device_id,
                 )
             except httpx.RequestError as exc:
                 entry["error"] = f"Could not reach CoreIoT at {COREIOT_API_BASE}: {exc}"
                 logger.warning(
-                    "post_shared_attribute network error: device=%s error=%s",
+                    "post_shared_attributes network error: device=%s error=%s",
                     device.get("name_device"), exc,
                 )
             except Exception as exc:  # noqa: BLE001
                 entry["error"] = f"Unexpected error: {exc}"
                 logger.exception(
-                    "post_shared_attribute unexpected error: device=%s",
+                    "post_shared_attributes unexpected error: device=%s",
                     device.get("name_device"),
                 )
 
@@ -395,6 +395,6 @@ def post_shared_attribute(devices: list[dict[str, Any]]) -> list[dict[str, Any]]
 
 __all__ = [
     "COREIOT_API_BASE",
-    "read_shared_attribute",
-    "post_shared_attribute",
+    "read_shared_attributes",
+    "post_shared_attributes",
 ]
