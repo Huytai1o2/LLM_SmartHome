@@ -35,7 +35,7 @@ class IoTActionAgent:
             devices: list[dict[str, Any]] = json.loads(devices_json)
         except (json.JSONDecodeError, TypeError) as exc:
             logger.error("IoTActionAgent: invalid JSON input — %s", exc)
-            return f"LỖI: dữ liệu devices không hợp lệ — {exc}"
+            return f"ERROR: invalid devices payload — {exc}"
 
         write_devices = []
         read_devices = []
@@ -90,23 +90,23 @@ class IoTActionAgent:
                 sensors_info = " | ".join(s_strings) if s_strings else str(r.get("after", {}))
 
                 if r.get("error"):
-                    lines.append(f"{r['name_device']} ({r['room']}): LỖI — {r['error']}")
+                    lines.append(f"{r['name_device']} ({r['room']}): ERROR — {r['error']}")
                 elif r.get("posted"):
-                    lines.append(f"{r['name_device']} ({r['room']}): thành công → {sensors_info}")
+                    lines.append(f"{r['name_device']} ({r['room']}): success → {sensors_info}")
                 else:
-                    lines.append(f"{r['name_device']} ({r['room']}): đã ở trạng thái yêu cầu → {sensors_info}")
+                    lines.append(f"{r['name_device']} ({r['room']}): already in requested state → {sensors_info}")
 
         if read_devices:
             result_json = read_shared_attributes_tool.forward(json.dumps(read_devices, ensure_ascii=False))
             for r in json.loads(result_json):
                 if r.get("error"):
-                    lines.append(f"{r['name_device']} ({r['room']}): LỖI — {r['error']}")
+                    lines.append(f"{r['name_device']} ({r['room']}): ERROR — {r['error']}")
                 else:
                     # You could also format read_devices by sensor here if needed, 
                     # but simple string dict is fine to pass to the generating agent
                     lines.append(f"{r['name_device']} ({r['room']}): {r['shared']}")
 
-        return "\n".join(lines) if lines else "Không có kết quả."
+        return "\n".join(lines) if lines else "No results."
 
 
 iot_action_agent = IoTActionAgent()

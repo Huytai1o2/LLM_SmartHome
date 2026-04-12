@@ -243,12 +243,12 @@ def _generate_final_response(user_message: str, result: str) -> str:
         return [{"type": "text", "text": text}]
         
     system_prompt = (
-        "Bạn là một trợ lý ảo quản lý nhà thông minh thân thiện. "
-        "Dựa vào 'Yêu cầu của người dùng' và 'Kết quả hệ thống' bên dưới, "
-        "hãy viết câu trả lời cuối cùng bằng ngôn ngữ tự nhiên, giao tiếp tự nhiên như người bản xứ. "
-        "Nếu kết quả báo lỗi (chẳng hạn như HTTP 408 hay lỗi kết nối), hãy giải thích lỗi đó "
-        "một cách dễ hiểu, thông cảm, và có thể đề xuất họ thử lại sau. "
-        "Chỉ trả về câu trả lời, không cần mào đầu hay định dạng dư thừa."
+        "You are a friendly smart home virtual assistant. "
+        "Based on the 'User Request' and 'System Result' below, "
+        "write the final response in natural language, communicating naturally like a native speaker. "
+        "If the result reports an error (such as HTTP 408 or connection error), explain the error "
+        "in an easily understandable, sympathetic way, and possibly suggest they try again later. "
+        "Return only the response, no preamble or redundant formatting."
     )
     
     try:
@@ -258,7 +258,7 @@ def _generate_final_response(user_message: str, result: str) -> str:
             {
                 "role": "user",
                 "content": _text(
-                    f"Yêu cầu của người dùng: {user_message}\n\nKết quả hệ thống:\n{result}"
+                    f"User Request: {user_message}\n\nSystem Result:\n{result}"
                 ),
             },
         ]
@@ -268,7 +268,7 @@ def _generate_final_response(user_message: str, result: str) -> str:
         return response.content
     except Exception as e:
         logger.warning(f"Final response generation failed: {str(e)}")
-        return f"Hệ thống báo kết quả:\n{result}"
+        return f"System reported result:\n{result}"
 
 
 # ---------------------------------------------------------------------------
@@ -302,7 +302,7 @@ def run_iot_pipeline(
     # ------------------------------------------------------------------
     # Step 1 — Extract intent (Pydantic structured output, no code gen)
     # ------------------------------------------------------------------
-    emit("Orchestrator", "Đang phân tích yêu cầu...")
+    emit("Orchestrator", "Analyzing request...")
     intent = _extract_intent(user_message, session_id=session_id, history=history)
     logger.info("Extracted intent: room=%s type=%s", intent.room_name, intent.type_device)
 
@@ -319,7 +319,7 @@ def run_iot_pipeline(
                 intent.type_device = hit.get("type_device") or None
             emit(
                 "Orchestrator",
-                f"Bộ nhớ đệm: {hit.get('device_name')} "
+                f"Buffer Memory: {hit.get('device_name')} "
                 f"({hit.get('room')})"
             )
             logger.debug("Buffer hit: %s", hit)
@@ -330,11 +330,11 @@ def run_iot_pipeline(
     # Step 3 — Clarify if info still missing
     # ------------------------------------------------------------------
     if intent.room_name is None or intent.type_device is None:
-        emit("Orchestrator", "Cần thêm thông tin...")
+        emit("Orchestrator", "Need more information...")
         question = clarification_agent.run(user_message, intent)
         return f"Clarification_Agent: {str(question)}"
 
-    emit("Orchestrator", f"Phòng: {intent.room_name} | Thiết bị: {intent.type_device}")
+    emit("Orchestrator", f"Room: {intent.room_name} | Device: {intent.type_device}")
 
     # ------------------------------------------------------------------
     # Step 4 — Iterate YAML → focused subset (deterministic, no LLM)
@@ -345,18 +345,18 @@ def run_iot_pipeline(
     )
     if yaml_subset.strip() == "rooms: []":
         return (
-            f"Orchestrator: Không tìm thấy thiết bị '{intent.type_device}' "
-            f"trong '{intent.room_name}'."
+            f"Orchestrator: Could not find device '{intent.type_device}' "
+            f"in '{intent.room_name}'."
         )
 
     # ------------------------------------------------------------------
     # Step 5 — Select target device(s) (Pydantic structured output)
     # ------------------------------------------------------------------
-    emit("Orchestrator", "Đang chọn thiết bị...")
+    emit("Orchestrator", "Selecting devices...")
     devices = _select_devices(user_message, yaml_subset, session_id=session_id)
 
     if not devices:
-        return "Orchestrator: Không thể xác định thiết bị cần điều khiển."
+        return "Orchestrator: Could not determine target device."
 
     devices_json = json.dumps(
         [d.model_dump() for d in devices], ensure_ascii=False
@@ -367,10 +367,10 @@ def run_iot_pipeline(
     # Step 6 — Route & execute via iot_action_agent (CodeAgent)
     # Decides write vs read split, calls post/read tools, updates BufferWindow
     # ------------------------------------------------------------------
-    emit("Orchestrator", "Đang thực thi lệnh...")
+    emit("Orchestrator", "Executing command...")
     raw_result = iot_action_agent.run(devices_json)
     
-    emit("Orchestrator", "Đang tạo câu trả lời...")
+    emit("Orchestrator", "Generating response...")
     final_response = _generate_final_response(user_message, raw_result)
     
     # Optional prefixes like "IoT_Action_Agent: " may not be needed anymore

@@ -48,7 +48,7 @@ class ClarificationAgent:
         buf = get_current_buffer()
         if buf and buf.all():
             recent = buf.all()[-1] # the most recent action
-            suggestion_msg = f" Hay là bạn muốn điều khiển '{recent.device_name}' ở '{recent.room}' như trước đó?"
+            suggestion_msg = f" Or perhaps you want to control '{recent.device_name}' in '{recent.room}' like before?"
 
         # Step 2 — Missing Room
         if not has_room:
@@ -63,8 +63,8 @@ class ClarificationAgent:
                 # Keep rooms that appear in yaml_result
                 room_names = [r for r in room_names if r in rooms]
             
-            room_list = ", ".join(room_names) if room_names else "không rõ"
-            return f"Bạn muốn điều khiển ở phòng nào? Các phòng hiện có: {room_list}.{suggestion_msg}"
+            room_list = ", ".join(room_names) if room_names else "unknown"
+            return f"Which room do you want to control? Available rooms: {room_list}.{suggestion_msg}"
             
         # Step 3 - Missing Device
         if not device_type:
@@ -77,10 +77,10 @@ class ClarificationAgent:
                 types_str = ", ".join(t_list)
                 details.append(f"{r} ({types_str})")
                 
-            avail_str = "; ".join(details) if details else "không rõ"
-            return f"Bạn muốn điều khiển thiết bị nào? (Các thiết bị hiện có: {avail_str} hoặc 'tất cả thiết bị').{suggestion_msg}"
+            avail_str = "; ".join(details) if details else "unknown"
+            return f"Which device do you want to control? (Available devices: {avail_str} or 'all devices').{suggestion_msg}"
             
-        return "Bạn hãy cung cấp rõ hơn thông tin thiết bị hoặc phòng nhé."
+        return "Please provide more specific information about the device or room."
 
 
 clarification_agent = ClarificationAgent()

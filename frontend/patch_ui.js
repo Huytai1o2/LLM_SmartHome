@@ -86,7 +86,7 @@ const newRender = `                    <div className="flex-1 min-w-0 break-word
                               )}
                               <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
                             </span>
-                            Tiến trình xử lý
+                            Processing
                             {(!msg.finalContent && isTyping && idx === messages.length - 1) ? "..." : " (Hoàn tất)"}
                           </div>
                           {msg.content}
@@ -96,7 +96,7 @@ const newRender = `                    <div className="flex-1 min-w-0 break-word
                       {msg.role === 'agent' && msg.finalContent && (
                         <div className="prose dark:prose-invert prose-p:leading-relaxed prose-p:my-1 text-black dark:text-white whitespace-pre-wrap">
                           <div className="inline-flex items-center gap-1.5 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 text-xs px-2.5 py-1 rounded-md mb-2 font-medium border border-blue-100 dark:border-blue-800/30">
-                            ✨ Kết quả
+                            Result
                           </div>
                           <br />
                           {msg.finalContent}
