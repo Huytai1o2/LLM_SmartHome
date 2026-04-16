@@ -31,6 +31,8 @@ session.
 
 from __future__ import annotations
 
+import json
+import os
 import contextvars
 import logging
 from collections import deque
@@ -41,6 +43,7 @@ from typing import Any, Iterable
 logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_SIZE: int = 100
+BUFFER_DIR = "memories/sessions"
 
 
 # ---------------------------------------------------------------------------
@@ -80,15 +83,45 @@ class ActionRecord:
 class BufferWindowMemory:
     """A FIFO sliding window of ActionRecords for a single session."""
 
-    def __init__(self, max_size: int = DEFAULT_MAX_SIZE) -> None:
+    def __init__(self, session_id: str, max_size: int = DEFAULT_MAX_SIZE) -> None:
+        self.session_id = session_id
         self.max_size = max_size
         self._records: deque[ActionRecord] = deque(maxlen=max_size)
+        self._load()
+
+    def _get_file_path(self) -> str:
+        os.makedirs(BUFFER_DIR, exist_ok=True)
+        return os.path.join(BUFFER_DIR, f"{self.session_id}.jsonl")
+
+    def _load(self) -> None:
+        path = self._get_file_path()
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        if not line.strip():
+                            continue
+                        data = json.loads(line)
+                        if "timestamp" in data:
+                            data["timestamp"] = datetime.fromisoformat(data["timestamp"])
+                        self._records.append(ActionRecord(**data))
+            except Exception as e:
+                logger.error(f"Failed to load buffer window for session {self.session_id}: {e}")
+
+    def _append_to_file(self, record: ActionRecord) -> None:
+        try:
+            path = self._get_file_path()
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record.to_dict(), ensure_ascii=False) + "\n")
+        except Exception as e:
+            logger.error(f"Failed to write buffer window for session {self.session_id}: {e}")
 
     # ----- mutation ------------------------------------------------------
 
     def append(self, record: ActionRecord) -> None:
         """Append a record. ``deque(maxlen=...)`` evicts the oldest entry on overflow."""
         self._records.append(record)
+        self._append_to_file(record)
 
     def extend(self, records: Iterable[ActionRecord]) -> None:
         for record in records:
@@ -96,6 +129,12 @@ class BufferWindowMemory:
 
     def clear(self) -> None:
         self._records.clear()
+        try:
+            path = self._get_file_path()
+            if os.path.exists(path):
+                os.remove(path)
+        except Exception:
+            pass
 
     # ----- query ---------------------------------------------------------
 
@@ -171,7 +210,7 @@ def get_buffer(session_id: str) -> BufferWindowMemory:
     """Return the BufferWindowMemory for *session_id*, creating it on first use."""
     buffer = _BUFFERS.get(session_id)
     if buffer is None:
-        buffer = BufferWindowMemory()
+        buffer = BufferWindowMemory(session_id=session_id)
         _BUFFERS[session_id] = buffer
     return buffer
 

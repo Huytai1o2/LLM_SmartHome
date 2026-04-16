@@ -57,22 +57,31 @@
       "name": "kitchen",
       "type_device": [
         {
-          "name_type": "smart_fan",
+          "name_type": "temperature_humidity",
           "devices": [
             {
-              "name": "quạt trần",
-              "device_token": "f9g8h7i6j5k4l3m2n1o0",
-              "device_id": "your-device-uuid-here",
-              "type": "smart_fan",
-              "description_location": "the ceiling of the kitchen",
+              "name": "smart_temperature_humidity",
+              "device_token": "xdF2nW4aR9SAdqqPiym0",
+              "device_id": "fcceeaa0-3111-11f1-9981-cffbb69f5b14",
+              "description_location": "the smart temperature and humidity sensor in the kitchen",
               "sensors": [
                 {
-                  "sensor_name": "fan",
+                  "sensor_name": "humidity_sensor",
                   "shared_attributes": [
                     {
-                      "name_key": "integer_fan_speed",
-                      "value": "integer",
-                      "description": "Represents the speed level of the fan zero is OFF/FALSE, three is ON/TRUE (0-off, 1-low, 2-medium, 3-high)"
+                      "name_key": "indoor_humidity",
+                      "value": "float",
+                      "description": "Represents the humidity level as a float between 0 and 100"
+                    }
+                  ]
+                },
+                {
+                  "sensor_name": "temperature_sensor",
+                  "shared_attributes": [
+                    {
+                      "name_key": "indoor_temperature",
+                      "value": "float",
+                      "description": "Represents the temperature level as a float in degrees Celsius"
                     }
                   ]
                 }

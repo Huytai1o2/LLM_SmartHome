@@ -104,6 +104,23 @@ class ReadSharedAttributeTool(Tool):
         except ValueError as exc:
             return json.dumps({"error": str(exc)})
         results = read_shared_attributes(device_list)
+
+        # Append successful reads to the per-session BufferWindowMemory.
+        buffer = get_current_buffer()
+        if buffer is not None:
+            for device, result in zip(device_list, results):
+                if not result.get("error"):
+                    buffer.append(
+                        ActionRecord(
+                            device_name=device.get("name_device") or "",
+                            room=device.get("room") or "",
+                            token=device.get("token") or "",
+                            action="read",
+                            type_device=device.get("type_device") or "",
+                            shared_attributes=result.get("shared", {}),
+                        )
+                    )
+
         return json.dumps(results, ensure_ascii=False, default=str)
 
 
@@ -149,7 +166,7 @@ class PostSharedAttributeTool(Tool):
         buffer = get_current_buffer()
         if buffer is not None:
             for device, result in zip(device_list, results):
-                if result.get("posted") and not result.get("error"):
+                if not result.get("error"):
                     buffer.append(
                         ActionRecord(
                             device_name=device.get("name_device") or "",

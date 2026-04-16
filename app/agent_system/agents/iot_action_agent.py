@@ -56,6 +56,10 @@ class IoTActionAgent:
             for sensor in devices_sensors:
                 attr = sensor.get("shared_attributes", {})
                 for k, v in attr.items():
+                    # Fallback for LLM hallucinating nested {"value": null} instead of just null
+                    if isinstance(v, dict) and "value" in v:
+                        v = v["value"]
+                        
                     if v is not None:
                         write_attrs[k] = v
                     else:
@@ -80,21 +84,37 @@ class IoTActionAgent:
                 orig_sensors = dict_by_token.get(token, [])
                 
                 # Format sensor output
-                s_strings = []
+                sensors_output = []
+                # Use after values if present (or fallback to original request intent)
+                shared_data = r.get("after", {}) or {k: v for sensor in orig_sensors for k, v in sensor.get("shared_attributes", {}).items() if v is not None}
+                
                 for sensor in orig_sensors:
                     s_name = sensor.get("sensor_name", "unknown")
                     # Filter attributes to those actually present in the write response/intent
-                    s_attr = {k: v for k, v in sensor.get("shared_attributes", {}).items() if v is not None}
-                    if s_attr:
-                        s_strings.append(f"{s_name}: {s_attr}")
-                sensors_info = " | ".join(s_strings) if s_strings else str(r.get("after", {}))
+                    s_keys = [k for k, v in sensor.get("shared_attributes", {}).items() if v is not None]
+                    s_attrs_list = []
+                    for k in s_keys:
+                        if k in shared_data:
+                            s_attrs_list.append({k: shared_data[k]})
+                    
+                    if s_attrs_list:
+                        parts = [
+                            "{",
+                            f"sensor_name: {s_name}",
+                            "shared_attributes:",
+                            json.dumps(s_attrs_list, ensure_ascii=False),
+                            "}"
+                        ]
+                        sensors_output.append("\n".join(parts))
+                        
+                sensors_info = "\n" + "\n".join(sensors_output) + "\n]" if sensors_output else "]"
 
                 if r.get("error"):
                     lines.append(f"{r['name_device']} ({r['room']}): ERROR — {r['error']}")
                 elif r.get("posted"):
-                    lines.append(f"{r['name_device']} ({r['room']}): success → {sensors_info}")
+                    lines.append(f"[{r['name_device']} ({r['room']}) success state:{sensors_info}")
                 else:
-                    lines.append(f"{r['name_device']} ({r['room']}): already in requested state → {sensors_info}")
+                    lines.append(f"[{r['name_device']} ({r['room']}) already in requested state:{sensors_info}")
 
         if read_devices:
             result_json = read_shared_attributes_tool.forward(json.dumps(read_devices, ensure_ascii=False))
@@ -102,9 +122,35 @@ class IoTActionAgent:
                 if r.get("error"):
                     lines.append(f"{r['name_device']} ({r['room']}): ERROR — {r['error']}")
                 else:
-                    # You could also format read_devices by sensor here if needed, 
-                    # but simple string dict is fine to pass to the generating agent
-                    lines.append(f"{r['name_device']} ({r['room']}): {r['shared']}")
+                    token = r.get("token")
+                    orig_sensors = dict_by_token.get(token, [])
+                    sensors_output = []
+                    
+                    shared_data = r.get("shared", {})
+                    for sensor in orig_sensors:
+                        s_name = sensor.get("sensor_name", "unknown")
+                        s_keys = list(sensor.get("shared_attributes", {}).keys())
+                        
+                        s_attrs_list = []
+                        for k in s_keys:
+                            if k in shared_data:
+                                s_attrs_list.append({k: shared_data[k]})
+                                
+                        if s_attrs_list:
+                            parts = [
+                                "{",
+                                f"sensor_name: {s_name}",
+                                "shared_attributes:",
+                                json.dumps(s_attrs_list, ensure_ascii=False),
+                                "}"
+                            ]
+                            sensors_output.append("\n".join(parts))
+
+                    if sensors_output:
+                        sensors_str = "\n".join(sensors_output)
+                        lines.append(f"[{r['name_device']} ({r['room']}):\n{sensors_str}\n]")
+                    else:
+                        lines.append(f"[{r['name_device']} ({r['room']}): {shared_data}]")
 
         return "\n".join(lines) if lines else "No results."
 

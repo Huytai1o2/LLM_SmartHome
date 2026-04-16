@@ -80,10 +80,13 @@ Select matching device(s) and ONLY the requested sensor(s) from YAML. Output JSO
 
 Rules:
 1. ONLY include the specific `sensor_name` and `name_key` that match the user's request. DO NOT include all sensors if the user only asked for one.
-2. `shared_attributes` MUST be ONE dict.
-3. If changing state ("bật"/"tắt"/etc): `<v>` must be the actual value (`true`, `false`, `1`, `0`, etc).
-4. If checking/reading state ("read"/"kiểm tra"/etc): `<v>` MUST literally be `null`.
+2. `shared_attributes` MUST be ONE dict matching `name_key` directly to its value. DO NOT output nested dicts.
+3. If changing state ("bật"/"tắt"/etc): `<v>` must be the primitive actual value (e.g., `true`, `false`, `1`, `0`).
+4. If checking/reading state ("read"/"kiểm tra"/"trạng thái"/etc): EVERY `<v>` MUST BE LITERALLY `null`. NEVER hallucinate a value when reading. (e.g. `"led_celling": null`).
 5. Copy token and device_id EXACTLY from YAML. NEVER invent.
+
+Example Read Request: "kiểm tra đèn"
+Output: {"devices": [{"name_device": "...", "token": "...", "device_id": "...", "room": "...", "type_device": "...", "sensors": [{"sensor_name": "led_celling", "shared_attributes": {"led_celling": null}}]}]}
 """
 
 
@@ -108,6 +111,35 @@ def _parse_json(text: str) -> any:
     match = re.search(r"[{\[]", text)
     if match:
         text = text[match.start():]
+        
+    # Auto-close brackets to handle truncated generation (e.g., max_new_tokens hit)
+    stack = []
+    in_string = False
+    escape = False
+    for char in text:
+        if escape:
+            escape = False
+            continue
+        if char == '\\':
+            escape = True
+            continue
+        if char == '"':
+            in_string = not in_string
+            continue
+            
+        if not in_string:
+            if char == '{':
+                stack.append('}')
+            elif char == '[':
+                stack.append(']')
+            elif char == '}' or char == ']':
+                if stack and stack[-1] == char:
+                    stack.pop()
+                    
+    if in_string:
+        text += '"'
+    while stack:
+        text += stack.pop()
         
     try:
         return json.loads(text)
@@ -221,7 +253,7 @@ def _generate_final_response(user_message: str, result: str, yaml_subset: str = 
         
     system_prompt = (
         "Act as a smart home assistant. Write a short, natural response based on 'User Request' & 'System Result'. "
-        "Explain errors sympathetically if any. Map 'System Result' values using 'Device Configuration'. Output final answer only."
+        "Explain errors sympathetically if any. Map the attributes in 'System Result' to their 'sensor_name' using 'Device Configuration' and READ THE DESCRIPTION OF ATTRIBUTE OF EACH SENSOR to summarize the status BY SENSOR NAME. Output final answer only."
     )
     
     try:
