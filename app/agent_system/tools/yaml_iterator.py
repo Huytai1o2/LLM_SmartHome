@@ -1,13 +1,13 @@
-"""Smart-home YAML iterator.
+"""Smart-home configuration iterator.
 
-Deterministic helper that filters ``smart_home_configuration.yaml`` by
+Deterministic helper that filters ``smart_home_configuration.json`` by
 ``room_name`` and ``type_device`` keywords and returns a small focused YAML
 subtree (the architecture's ``dataset_tmp.yaml``).
 
-The YAML is the source of truth for the device registry — it is **never**
+The JSON is the source of truth for the device registry — it is **never**
 embedded into FAISS. Instead, agents extract keywords (room + device type)
 and call this helper to get only the relevant slice, which is then handed
-to the next agent (Retriever Agent) as inline context.
+to the next agent (Retriever Agent) as inline context in YAML format to save tokens.
 
 Typical usage
 -------------
@@ -31,32 +31,33 @@ from smolagents import Tool
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_YAML_PATH: str = os.environ.get(
+DEFAULT_JSON_PATH: str = os.environ.get(
     "SMART_HOME_CONFIG_PATH",
-    "knowledge_base/iot_knowledge/smart_home_configuration.yaml",
+    "knowledge_base/iot_knowledge/smart_home_configuration.json",
 )
 
 
 # ---------------------------------------------------------------------------
-# YAML loading (cached)
+# JSON loading (cached)
 # ---------------------------------------------------------------------------
 
 
 @functools.lru_cache(maxsize=4)
-def _load_yaml(path: str) -> dict[str, Any]:
-    """Parse the smart-home YAML once per path and cache the result."""
+def _load_json(path: str) -> dict[str, Any]:
+    """Parse the smart-home JSON once per path and cache the result."""
+    import json
     with open(path, encoding="utf-8") as f:
-        data = yaml.safe_load(f) or {}
+        data = json.load(f) or {}
     if not isinstance(data, dict) or "rooms" not in data:
         raise ValueError(
-            f"Smart home YAML at '{path}' is missing the top-level 'rooms' key."
+            f"Smart home configuration at '{path}' is missing the top-level 'rooms' key."
         )
     return data
 
 
-def reload_yaml_cache() -> None:
-    """Drop the cached YAML so the next call re-reads from disk."""
-    _load_yaml.cache_clear()
+def reload_config_cache() -> None:
+    """Drop the cached config so the next call re-reads from disk."""
+    _load_json.cache_clear()
 
 
 # ---------------------------------------------------------------------------
@@ -110,9 +111,9 @@ def _filter_rooms(
 def iterate_smart_home_yaml(
     room_name: str | list[str] | None = None,
     type_device: str | list[str] | None = None,
-    yaml_path: str = DEFAULT_YAML_PATH,
+    json_path: str = DEFAULT_JSON_PATH,
 ) -> str:
-    """Filter the smart-home YAML and return the matching subtree as a YAML string.
+    """Filter the smart-home JSON and return the matching subtree as a YAML string.
 
     Parameters
     ----------
@@ -122,8 +123,8 @@ def iterate_smart_home_yaml(
     type_device:
         One or more ``name_type`` values to keep (e.g. ``"smart_light"``).
         ``None`` keeps every device type within each matched room.
-    yaml_path:
-        Path to ``smart_home_configuration.yaml``. Defaults to the project's
+    json_path:
+        Path to ``smart_home_configuration.json``. Defaults to the project's
         canonical location.
 
     Returns
@@ -142,7 +143,7 @@ def iterate_smart_home_yaml(
 
         If nothing matches the filter, returns ``"rooms: []\\n"``.
     """
-    data = _load_yaml(yaml_path)
+    data = _load_json(json_path)
 
     rooms_filter = _normalise(room_name)
     types_filter = _normalise(type_device)
@@ -151,18 +152,18 @@ def iterate_smart_home_yaml(
     return yaml.safe_dump(subtree, sort_keys=False, allow_unicode=True)
 
 
-def list_available_rooms(yaml_path: str = DEFAULT_YAML_PATH) -> list[str]:
-    """Return every ``rooms[].name`` defined in the YAML."""
-    data = _load_yaml(yaml_path)
+def list_available_rooms(json_path: str = DEFAULT_JSON_PATH) -> list[str]:
+    """Return every ``rooms[].name`` defined in the config."""
+    data = _load_json(json_path)
     return [str(room.get("name")) for room in data.get("rooms", []) if room.get("name")]
 
 
 def list_available_type_devices(
     room_name: str | None = None,
-    yaml_path: str = DEFAULT_YAML_PATH,
+    json_path: str = DEFAULT_JSON_PATH,
 ) -> list[str]:
     """Return every distinct ``name_type`` (optionally restricted to ``room_name``)."""
-    data = _load_yaml(yaml_path)
+    data = _load_json(json_path)
     types: list[str] = []
     for room in data.get("rooms", []):
         if room_name and str(room.get("name", "")).lower() != room_name.lower():
@@ -174,9 +175,9 @@ def list_available_type_devices(
     return types
 
 
-def get_room_and_device_types(yaml_path: str = DEFAULT_YAML_PATH) -> dict[str, list[str]]:
+def get_room_and_device_types(json_path: str = DEFAULT_JSON_PATH) -> dict[str, list[str]]:
     """Return a mapping of room name to its list of name_type values."""
-    data = _load_yaml(yaml_path)
+    data = _load_json(json_path)
     mapping: dict[str, list[str]] = {}
     for room in data.get("rooms", []):
         r_name = str(room.get("name", ""))
@@ -190,29 +191,37 @@ def get_room_and_device_types(yaml_path: str = DEFAULT_YAML_PATH) -> dict[str, l
     return mapping
 
 
-def get_device_summary(yaml_path: str = DEFAULT_YAML_PATH) -> str:
-    """Return a string summarizing rooms, device types, names, and descriptions."""
-    data = _load_yaml(yaml_path)
-    lines = []
+def get_device_summary(json_path: str = DEFAULT_JSON_PATH) -> str:
+    """Return a YAML string summarizing rooms, device types, names, and descriptions."""
+    data = _load_json(json_path)
+    summary_rooms = []
+    
     for room in data.get("rooms", []):
         r_name = str(room.get("name", "unknown"))
-        lines.append(f"Room: {r_name}")
+        room_types = []
         for td in room.get("type_device", []) or []:
             t_name = str(td.get("name_type", "unknown"))
-            lines.append(f"  Type: {t_name}")
+            dev_list = []
             for dev in td.get("devices", []) or []:
                 d_name = str(dev.get("name", "unknown"))
                 d_desc = str(dev.get("description_location", ""))
-                desc_str = f" ({d_desc})" if d_desc else ""
-                lines.append(f"    - Device: {d_name}{desc_str}")
-    return "\n".join(lines)
+                dev_dict = {"name": d_name}
+                if d_desc:
+                    dev_dict["description"] = d_desc
+                dev_list.append(dev_dict)
+            if dev_list:
+                room_types.append({"type": t_name, "devices": dev_list})
+        if room_types:
+            summary_rooms.append({"room": r_name, "types": room_types})
+            
+    return yaml.safe_dump({"device_summary": summary_rooms}, sort_keys=False, allow_unicode=True)
 
 
-def get_device_keyword_mapping(yaml_path: str = DEFAULT_YAML_PATH) -> dict[str, str]:
+def get_device_keyword_mapping(json_path: str = DEFAULT_JSON_PATH) -> dict[str, str]:
     """Dynamically generate a mapping of device keywords to their type_device.
     E.g. 'đèn trần' -> 'smart_light', 'quạt' -> 'smart_fan'.
     """
-    data = _load_yaml(yaml_path)
+    data = _load_json(json_path)
     mapping = {
         "tất cả thiết bị": "all",
         "các thiết bị": "all",
@@ -260,7 +269,7 @@ def get_device_keyword_mapping(yaml_path: str = DEFAULT_YAML_PATH) -> dict[str, 
 class IterateSmartHomeYamlTool(Tool):
     name = "iterate_smart_home_yaml"
     description = (
-        "Filter the smart_home_configuration.yaml by room_name and type_device "
+        "Filter the smart_home_configuration.json by room_name and type_device "
         "and return only the matching subtree as a YAML string. "
         "Use this when you have already extracted the room and device-type "
         "keywords from the user's request and want to hand a small focused "
@@ -299,12 +308,12 @@ class IterateSmartHomeYamlTool(Tool):
                 type_device=type_device or None,
             )
         except FileNotFoundError as exc:
-            return f"Error: smart_home_configuration.yaml not found ({exc})."
-        except yaml.YAMLError as exc:
-            return f"Error: invalid YAML in smart_home_configuration.yaml ({exc})."
+            return f"Error: smart_home_configuration.json not found ({exc})."
+        except ValueError as exc:
+            return f"Error: invalid JSON in smart_home_configuration.json ({exc})."
         except Exception as exc:  # noqa: BLE001
             logger.exception("iterate_smart_home_yaml failed")
-            return f"Error iterating smart-home YAML: {exc}"
+            return f"Error iterating smart-home JSON: {exc}"
 
 
 iterate_smart_home_yaml_tool = IterateSmartHomeYamlTool()
@@ -317,9 +326,9 @@ __all__ = [
     "get_room_and_device_types",
     "get_device_summary",
     "get_device_keyword_mapping",
-    "reload_yaml_cache",
+    "reload_config_cache",
     "IterateSmartHomeYamlTool",
     "iterate_smart_home_yaml_tool",
-    "DEFAULT_YAML_PATH",
+    "DEFAULT_JSON_PATH",
 ]
 # EOF

@@ -87,7 +87,7 @@ const newRender = `                    <div className="flex-1 min-w-0 break-word
                               <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
                             </span>
                             Processing
-                            {(!msg.finalContent && isTyping && idx === messages.length - 1) ? "..." : " (Hoàn tất)"}
+                            {(!msg.finalContent && isTyping && idx === messages.length - 1) ? "..." : " (Completed)"}
                           </div>
                           {msg.content}
                         </div>

@@ -11,7 +11,7 @@ Static knowledge (embedded once, auto-rebuilt on change)
 - ``rule/``         — automation rules (triggers, conditions, actions)
 - ``demonstration/``— worked examples: user request → CoreIoT API call
 
-Note: The device registry is in ``smart_home_configuration.yaml`` and is
+Note: The device registry is in ``smart_home_configuration.json`` and is
 NEVER embedded into FAISS. Agents query it live via ``iterate_smart_home_yaml_tool``.
 Conversation history is async-embedded separately by ``conversation_memory``.
 

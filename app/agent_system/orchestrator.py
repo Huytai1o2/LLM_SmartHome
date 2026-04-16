@@ -58,75 +58,32 @@ if not logger.handlers:
 def _get_intent_system_prompt(session_id: str = None, user_message: str = "") -> str:
     device_summary = get_device_summary()
     buf = get_current_buffer()
-    recent_context = buf.to_context_string(limit=5) if buf else "(empty)"
-    conversation_history = load_conversation_context(user_message, session_id=session_id) if session_id else "(empty history)"
+    recent_context = buf.to_context_string(limit=2) if buf else ""
+    conversation_history = load_conversation_context(user_message, session_id=session_id) if session_id else ""
     
     return f"""\
-You are an IoT intent extractor for a Vietnamese smart home system.
-Given the user's message, match their request against the devices in the YAML to determine the correct `room_name` and `type_device`.
-Output ONLY valid JSON: {{"room_name": "...", "type_device": "..."}}
-
-Available Devices in system (Use the Device name and Description below to map to room_name and type_device):
+Extract intent as JSON: {{"room_name": "...", "type_device": "...", "device_name": "..."}}. Use `null` if missing. Maps to "all" if user says "tất cả".
+You MUST output ONLY a valid JSON object. No explanations, no conversation.
+Available devices:
 {device_summary}
 
-Recent Turn APIs (Buffer Window):
-{recent_context}
-
-Long-term Conversation History (Use this to resolve what was previously interacted if unmentioned):
-{conversation_history}
-
-Extraction Rules:
-  - Find the best matching Device name or description for the user's request. Output its `room_name` and `type_device`.
-  - "all" / "tất cả phòng" / "các phòng" / "cả nhà" → "room_name": "all"
-  - "all" / "tất cả thiết bị" / "mọi thứ"         → "type_device": "all"
-  - EXTREMELY IMPORTANT: Focus on the exact nouns (including sensors like quạt, đèn ngủ, đèn trần). DO NOT default to "all". If the user says "tắt mỗi quạt cho tôi" (turn off just the fan), do NOT output "all". Output only the corresponding room/device type for that single fan based on Recent Context or Available Devices.
-  - If a specific room or device isn't mentioned explicitly but was recently mentioned in `Recent Context` or history (like "quạt", "đèn"), you MUST use that context to fill in `room_name` and `type_device` exactly.
-  - Otherwise, output `null` for the missing field.
+Recent Context: {recent_context}
+History: {conversation_history}
 
 Examples:
-  "bật đèn trần phòng khách" → {{"room_name": "living_room", "type_device": "smart_light_fan"}}
-  "tắt quạt phòng khách"     → {{"room_name": "living_room", "type_device": "smart_light_fan"}}
-  "tắt đèn bếp"              → {{"room_name": "kitchen",     "type_device": "smart_light"}}
-  "bật tất cả thiết bị"      → {{"room_name": "all",         "type_device": "all"}}
-  "tất cả thiết bị phòng khách" → {{"room_name": "living_room", "type_device": "all"}}
+"bật đèn phòng khách" → {{"room_name": "living_room", "type_device": "smart_light_fan", "device_name": "Celling_fan_bedside_night_light"}}
+"tắt quạt" → {{"room_name": null, "type_device": "smart_light_fan", "device_name": null}}
 """
 
 _RETRIEVER_SYSTEM_PROMPT = """\
-You are a device-selector for an IoT smart home.
-Given the user request and a YAML device config, select the matching device(s).
-Output ONLY valid JSON object: {"devices": [...]}
+Select matching device(s) and ONLY the requested sensor(s) from YAML. Output JSON ONLY: {"devices": [{"name_device":"<name>","token":"<token>","device_id":"<id>","room":"<room>","type_device":"<type>","sensors":[{"sensor_name":"<sensor>","shared_attributes":{"<k>":<v>}}]}]}
 
-Output schema for each device:
-{
-  "name_device":  "<name from YAML>",
-  "token":        "<device_token from YAML — NEVER invent>",
-  "device_id":    "<device_id from YAML — NEVER invent, null if not present>",
-  "room":         "<room name from YAML>",
-  "type_device":  "<name_type from YAML e.g. smart_light, smart_fan>",
-  "sensors": [
-    {
-      "sensor_name": "<name of the sensor from YAML>",
-      "shared_attributes": {"<name_key_1>": <value_1>, "<name_key_2>": <value_2>} // CRITICAL: MUST be a single DICTIONARY, NOT a list of objects!
-    }
-  ]
-}
-
-Intent → shared_attributes rules:
-  1. Identify which `sensor` (e.g. led_celling, brightness_beside_night_light, fan) inside the device matches the user's request.
-  2. MATCH ALL ATTRIBUTES: You MUST include ALL `shared_attributes` listed under that matching `sensor_name` in the YAML as key-value pairs in a SINGLE DICTIONARY. DO NOT use a list of objects like [{"name_key": "x", "value": y}]. It MUST format as {"x": y}. If a sensor has 2 attributes, activate both. If it has n attributes, activate all n.
-  3. Determine values for each attribute based on intent:
-      "bật" / "turn on"            → boolean: true; integer: target/max value (e.g. speed=3, brightness=1) as described.
-      "tắt" / "turn off"           → boolean: false; integer: 0.
-      "đang ... hay ...?" / "?"    → set ALL attributes under the sensor to `null` to read status.
-      "độ sáng X" / "màu Y"        → set the specific boolean and integer value.
-      "tốc độ X" / "speed X"       → set the speed integer.
-
-Selection rules:
-  - User mentions a specific device or sensor function → include only that device.
-  - "all" / "tất cả"            → include every device from the YAML, and activate ALL sensors and attributes.
-  - Only one device in YAML     → include it automatically.
-
-CRITICAL: copy device_token and device_id EXACTLY from the YAML. Never invent values.
+Rules:
+1. ONLY include the specific `sensor_name` and `name_key` that match the user's request. DO NOT include all sensors if the user only asked for one.
+2. `shared_attributes` MUST be ONE dict.
+3. If changing state ("bật"/"tắt"/etc): `<v>` must be the actual value (`true`, `false`, `1`, `0`, etc).
+4. If checking/reading state ("read"/"kiểm tra"/etc): `<v>` MUST literally be `null`.
+5. Copy token and device_id EXACTLY from YAML. NEVER invent.
 """
 
 
@@ -174,11 +131,18 @@ def _extract_intent(
 
     messages: list = [{"role": "system", "content": _text(_get_intent_system_prompt(session_id, user_message))}]
 
+    # Combine history into the user message to prevent the model from roleplaying as "assistant"
+    # and falling into conversational output instead of JSON.
+    user_req = ""
     if history:
-        for msg in history[-4:]:  # last 2 turns (4 messages) for context
-            messages.append({"role": msg["role"], "content": _text(msg["content"])})
+        user_req += "[Recent Conversation History]\n"
+        for msg in history[-4:]:  # last 2 turns
+            user_req += f"{msg['role'].upper()}: {msg['content']}\n"
+        user_req += "\n"
+        
+    user_req += f"[Current Request]\nUSER: {user_message}\n\n=> Output JSON intent now:"
 
-    messages.append({"role": "user", "content": _text(user_message)})
+    messages.append({"role": "user", "content": _text(user_req)})
 
     try:
         logger.info(f"API CALL: _extract_intent")
@@ -189,13 +153,14 @@ def _extract_intent(
         return UserIntent(
             room_name=data.get("room_name") or None,
             type_device=data.get("type_device") or None,
+            device_name=data.get("device_name") or None,
         )
     except Exception as e:
         logger.warning(f"Intent extraction failed: {str(e)} — returning empty intent")
         return UserIntent()
 
 
-def _select_devices(user_message: str, yaml_subset: str, session_id: str = None) -> List[DeviceAction]:
+def _select_devices(user_message: str, yaml_subset: str, intent: UserIntent = None, session_id: str = None) -> List[DeviceAction]:
     """Call the LLM to select device(s) from the YAML subset and determine
     what value to set (or None for read).
 
@@ -206,6 +171,18 @@ def _select_devices(user_message: str, yaml_subset: str, session_id: str = None)
     def _text(text: str) -> list:
         return [{"type": "text", "text": text}]
 
+    intent_yaml = ""
+    if intent:
+        intent_yaml = (
+            "Extracted Intent (YAML):\n"
+            "rooms:\n"
+            f"  - name: {intent.room_name}\n"
+            "    type_device:\n"
+            f"      - name_type: {intent.type_device}\n"
+            "        devices:\n"
+            f"          - name: {intent.device_name}\n\n"
+        )
+
     try:
         logger.info("API CALL: _select_devices")
         messages = [
@@ -213,7 +190,7 @@ def _select_devices(user_message: str, yaml_subset: str, session_id: str = None)
             {
                 "role": "user",
                 "content": _text(
-                    f"User request: {user_message}\n\nDevice YAML:\n{yaml_subset}\n\nLong-term Conversation History:\n{conversation_history}"
+                    f"User request: {user_message}\n\n{intent_yaml}Device YAML:\n{yaml_subset}\n\nLong-term Conversation History:\n{conversation_history}"
                 ),
             },
         ]
@@ -237,18 +214,14 @@ def _select_devices(user_message: str, yaml_subset: str, session_id: str = None)
         return []
 
 
-def _generate_final_response(user_message: str, result: str) -> str:
+def _generate_final_response(user_message: str, result: str, yaml_subset: str = "") -> str:
     """Sử dụng LLM để chuyển đổi kết quả thực thi thành câu trả lời ngôn ngữ tự nhiên."""
     def _text(text: str) -> list:
         return [{"type": "text", "text": text}]
         
     system_prompt = (
-        "You are a friendly smart home virtual assistant. "
-        "Based on the 'User Request' and 'System Result' below, "
-        "write the final response in natural language, communicating naturally like a native speaker. "
-        "If the result reports an error (such as HTTP 408 or connection error), explain the error "
-        "in an easily understandable, sympathetic way, and possibly suggest they try again later. "
-        "Return only the response, no preamble or redundant formatting."
+        "Act as a smart home assistant. Write a short, natural response based on 'User Request' & 'System Result'. "
+        "Explain errors sympathetically if any. Map 'System Result' values using 'Device Configuration'. Output final answer only."
     )
     
     try:
@@ -258,7 +231,7 @@ def _generate_final_response(user_message: str, result: str) -> str:
             {
                 "role": "user",
                 "content": _text(
-                    f"User Request: {user_message}\n\nSystem Result:\n{result}"
+                    f"User Request: {user_message}\n\nSystem Result:\n{result}\n\nDevice Configuration:\n{yaml_subset}"
                 ),
             },
         ]
@@ -353,7 +326,7 @@ def run_iot_pipeline(
     # Step 5 — Select target device(s) (Pydantic structured output)
     # ------------------------------------------------------------------
     emit("Orchestrator", "Selecting devices...")
-    devices = _select_devices(user_message, yaml_subset, session_id=session_id)
+    devices = _select_devices(user_message, yaml_subset, intent, session_id=session_id)
 
     if not devices:
         return "Orchestrator: Could not determine target device."
@@ -371,7 +344,7 @@ def run_iot_pipeline(
     raw_result = iot_action_agent.run(devices_json)
     
     emit("Orchestrator", "Generating response...")
-    final_response = _generate_final_response(user_message, raw_result)
+    final_response = _generate_final_response(user_message, raw_result, yaml_subset)
     
     # Optional prefixes like "IoT_Action_Agent: " may not be needed anymore
     return final_response

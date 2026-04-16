@@ -40,6 +40,13 @@ class UserIntent(BaseModel):
             "None if the user did not mention a device type."
         ),
     )
+    device_name: Any = Field(
+        default=None,
+        description=(
+            "The specific device name mentioned by the user. "
+            "None if the user did not mention a specific device name."
+        ),
+    )
 
 
 class SensorAction(BaseModel):

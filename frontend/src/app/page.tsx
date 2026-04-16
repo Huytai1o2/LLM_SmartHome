@@ -9,6 +9,8 @@ type Message = {
   role: "user" | "agent";
   content: string;
   finalContent?: string;
+  startTime?: number;
+  responseTime?: number;
 };
 
 type SessionInfo = {
@@ -128,7 +130,7 @@ export default function ChatPage() {
     const userMsg: Message = { id: uuidv4(), role: "user", content: input.trim() };
     const agentMsgId = uuidv4();
     
-    setMessages((prev) => [...prev, userMsg, { id: agentMsgId, role: "agent", content: "" }]);
+    setMessages((prev) => [...prev, userMsg, { id: agentMsgId, role: "agent", content: "", startTime: Date.now() }]);
     setInput("");
     setIsTyping(true);
 
@@ -165,6 +167,14 @@ export default function ChatPage() {
           const line = lines[i];
           if (line.startsWith("event: agent.message.done") || line.startsWith("event: agent.workflow.failed")) {
              setIsTyping(false);
+             setMessages((prev) =>
+               prev.map((msg) => {
+                 if (msg.id === agentMsgId && msg.startTime && !msg.responseTime) {
+                   return { ...msg, responseTime: (Date.now() - msg.startTime) / 1000 };
+                 }
+                 return msg;
+               })
+             );
           }
           if (line.startsWith("data: ")) {
             const dataStr = line.slice(6).trim();
@@ -313,7 +323,7 @@ export default function ChatPage() {
                               <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
                             </span>
                             Processing
-                            {(!msg.finalContent && isTyping && idx === messages.length - 1) ? "..." : " (Hoàn tất)"}
+                            {(!msg.finalContent && isTyping && idx === messages.length - 1) ? "..." : " (Completed)"}
                           </div>
                           {msg.content}
                         </div>
@@ -321,10 +331,16 @@ export default function ChatPage() {
                       
                       {msg.role === 'agent' && msg.finalContent && (
                         <div className="prose dark:prose-invert prose-p:leading-relaxed prose-p:my-1 text-black dark:text-white whitespace-pre-wrap">
-                          <div className="inline-flex items-center gap-1.5 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 text-xs px-2.5 py-1 rounded-md mb-2 font-medium border border-blue-100 dark:border-blue-800/30">
-                            Result
+                          <div className="flex items-center gap-2 mb-2">
+                            <div className="inline-flex items-center gap-1.5 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 text-xs px-2.5 py-1 rounded-md font-medium border border-blue-100 dark:border-blue-800/30">
+                              Result
+                            </div>
+                            {msg.responseTime && (
+                              <span className="text-xs text-gray-500 dark:text-gray-400 font-mono">
+                                {msg.responseTime.toFixed(1)}s
+                              </span>
+                            )}
                           </div>
-                          <br />
                           {msg.finalContent}
                         </div>
                       )}
