@@ -63,7 +63,7 @@ To ensure high reliability with small local LLMs (like `gemma4:e2b` or `qwen3:1.
 4. **JSON → Convert YAML (Save Tokens):** `iterate_smart_home_yaml` filters the large master `smart_home_configuration.json` device registry using the extracted intent keywords. It isolates only the matching device node (subtree) and dynamically converts it into a `YAML` string.
 5. **Embedded Prompt → Structured Output:** This minimal `YAML` string is embedded into the prompt for the Retreiver/Device Selector. Because YAML is extremely token-efficient compared to JSON, the LLM processes it cheaply and responds with a strict, validated `DeviceAction` **JSON list** (containing exact tokens and API IDs).
 6. **Execute (CodeAgent):** The `IoT Action Agent` (the only actual `CodeAgent` in the pipeline) absorbs the validated JSON list, categorizes read vs. write actions, and securely hits the CoreIoT API.
-7. **Update Buffer & Reply:** Successful actions are appended to the session's Buffer Window Memory, and a final LLM call transforms raw API output into a friendly, natural language response.
+7. **Update Buffer, Save History & Reply:** Successful actions are appended to the session's Buffer Window Memory. A final LLM call transforms raw API output into a friendly, natural language response. Finally, the entire turn (user query and system result) is asynchronously embedded into the FAISS Vector Store for long-term semantic recall.
 
 ---
 
