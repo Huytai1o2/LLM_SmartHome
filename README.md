@@ -120,16 +120,16 @@ npm run dev
 
 ## 📂 Project Structure
 
-| Path | Description |
-|---|---|
-| `app/agent_system/` | 8-step Deterministic Orchestrator, memory buffers, CodeAgents |
-| `app/vectore_store/` | FAISS indexing logic for Conversation & Knowledge Base |
-| `app/` (rest) | FastAPI routing, Database SQLAlchemy models, repo layer |
-| `knowledge_base/` | Automation rules, examples, and the master `json` registry |
-| `memories/sessions/` | Per-session `.jsonl` sliding buffer window logs |
-| `frontend/` | Next.js web interface for interacting with the agents |
-| `HardwareTest_CoreIoT/`| PlatformIO C++ firmware to simulate physical ESP32/IoT nodes |
-| `alembic/` | Database migration versions |
+| Path                    | Description                                                   |
+| ----------------------- | ------------------------------------------------------------- |
+| `app/agent_system/`     | 8-step Deterministic Orchestrator, memory buffers, CodeAgents |
+| `app/vectore_store/`    | FAISS indexing logic for Conversation & Knowledge Base        |
+| `app/` (rest)           | FastAPI routing, Database SQLAlchemy models, repo layer       |
+| `knowledge_base/`       | Automation rules, examples, and the master `json` registry    |
+| `memories/sessions/`    | Per-session `.jsonl` sliding buffer window logs               |
+| `frontend/`             | Next.js web interface for interacting with the agents         |
+| `HardwareTest_CoreIoT/` | PlatformIO C++ firmware to simulate physical ESP32/IoT nodes  |
+| `alembic/`              | Database migration versions                                   |
 
 ---
 
@@ -156,3 +156,19 @@ OLLAMA_API_KEY=your_api_key_here
 
 For physical device simulation or testing against real hardware, check the `HardwareTest_CoreIoT/` folder. It uses **PlatformIO** and enables flashing mock endpoints to ESP32/Yolo Uno boards via `platformio.ini`.
 
+## 📸 System in Action & Usecases
+
+Here are some real-world examples demonstrating how the AI Agents parse natural language, resolve missing contexts, and execute Home commands on the hardware:
+
+![11-29-03](pictures/Screenshot%20from%202026-04-17%2011-29-03.png)
+![11-29-11](pictures/Screenshot%20from%202026-04-17%2011-29-11.png)
+![11-29-19](pictures/Screenshot%20from%202026-04-17%2011-29-19.png)
+![11-29-34](pictures/Screenshot%20from%202026-04-17%2011-29-34.png)
+![11-29-40](pictures/Screenshot%20from%202026-04-17%2011-29-40.png)
+![11-29-48](pictures/Screenshot%20from%202026-04-17%2011-29-48.png)
+![11-29-54](pictures/Screenshot%20from%202026-04-17%2011-29-54.png)
+![11-30-01](pictures/Screenshot%20from%202026-04-17%2011-30-01.png)
+![11-30-06](pictures/Screenshot%20from%202026-04-17%2011-30-06.png)
+![11-30-12](pictures/Screenshot%20from%202026-04-17%2011-30-12.png)
+![11-30-19](pictures/Screenshot%20from%202026-04-17%2011-30-19.png)
+![11-30-22](pictures/Screenshot%20from%202026-04-17%2011-30-22.png)
