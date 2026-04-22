@@ -49,6 +49,11 @@ class UserIntent(BaseModel):
     )
 
 
+class UserIntentList(BaseModel):
+    """List of intents extracted from the user message to support multi-device/multi-room."""
+    intents: List[UserIntent]
+
+
 class SensorAction(BaseModel):
     """One sensor function within a device, containing multiple attributes."""
     sensor_name: str

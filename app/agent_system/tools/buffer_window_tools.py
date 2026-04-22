@@ -51,6 +51,13 @@ class CheckBufferWindowTool(Tool):
             if any(word in haystack for word in words):
                 matches.append(record.to_dict())
 
+        # FALLBACK: If no explicit keyword matched, we return the most recent 
+        # interacted devices. This avoids language-specific hardcoded phrases
+        # (like "hồi nãy", "earlier", "刚才") while giving the LLM context to infer.
+        if not matches:
+            recent_records = buffer.all()[-2:] # take up to 2 most recent
+            matches = [r.to_dict() for r in recent_records]
+
         return json.dumps(matches, ensure_ascii=False, default=str)
 
 

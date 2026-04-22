@@ -46,16 +46,54 @@ COREIOT_PASSWORD: str = os.environ.get("COREIOT_PASSWORD", "")
 
 
 # ---------------------------------------------------------------------------
-# JWT cache — login once, reuse until 401
+# JWT cache — login once, reuse until 401. Auto-refresh every 5 minutes.
 # ---------------------------------------------------------------------------
 
+import time
+
 _jwt_token: str | None = None
+_refresh_token: str | None = None
 _jwt_lock = threading.Lock()
+_refresh_thread_started = False
+
+
+def _continuous_refresh() -> None:
+    """Daemon thread that refreshes the JWT token every 5 minutes."""
+    global _jwt_token, _refresh_token
+    while True:
+        time.sleep(300)  # 5 minutes
+        with _jwt_lock:
+            if not _refresh_token:
+                continue
+            try:
+                with httpx.Client() as client:
+                    url = f"{COREIOT_API_BASE}/api/auth/token"
+                    resp = client.post(
+                        url,
+                        json={"refreshToken": _refresh_token},
+                        timeout=HTTP_TIMEOUT_SECONDS,
+                    )
+                    if resp.is_success:
+                        data = resp.json()
+                        _jwt_token = data.get("token", _jwt_token)
+                        _refresh_token = data.get("refreshToken", _refresh_token)
+                        logger.info("CoreIoT JWT token refreshed successfully.")
+                    else:
+                        logger.warning(
+                            "Failed to refresh JWT token: status=%s body=%s",
+                            resp.status_code, resp.text,
+                        )
+                        _jwt_token = None
+                        _refresh_token = None
+            except Exception as exc:
+                logger.error("Error refreshing JWT token: %s", exc)
+                _jwt_token = None
+                _refresh_token = None
 
 
 def _get_jwt(client: httpx.Client) -> str:
     """Login to CoreIoT and return a JWT token. Cached per process."""
-    global _jwt_token
+    global _jwt_token, _refresh_token, _refresh_thread_started
     with _jwt_lock:
         if _jwt_token:
             return _jwt_token
@@ -75,16 +113,25 @@ def _get_jwt(client: httpx.Client) -> str:
                 resp.status_code, resp.text, COREIOT_USERNAME,
             )
         resp.raise_for_status()
-        _jwt_token = resp.json()["token"]
+        data = resp.json()
+        _jwt_token = data["token"]
+        _refresh_token = data.get("refreshToken")
         logger.info("CoreIoT JWT obtained for user=%s", COREIOT_USERNAME)
+
+        if not _refresh_thread_started:
+            threading.Thread(target=_continuous_refresh, daemon=True).start()
+            _refresh_thread_started = True
+
         return _jwt_token
 
 
 def _invalidate_jwt() -> None:
     """Clear cached JWT so next call re-authenticates."""
-    global _jwt_token
+    global _jwt_token, _refresh_token
     with _jwt_lock:
         _jwt_token = None
+        _refresh_token = None
+
 
 
 # ---------------------------------------------------------------------------

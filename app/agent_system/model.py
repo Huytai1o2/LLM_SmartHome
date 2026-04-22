@@ -44,10 +44,20 @@ if _mode == "cloud":
         api_key=os.environ.get("OLLAMA_API_KEY", ""),
         **_no_think,
     )
+    thinking_model = OpenAIServerModel(
+        model_id=_model_id,
+        api_base="https://ollama.com/v1",
+        api_key=os.environ.get("OLLAMA_API_KEY", ""),
+    )
 else:
     model = OpenAIServerModel(
         model_id=_model_id,
         api_base=os.environ.get("LLAMA_SERVER_URL", "http://localhost:11434/v1"),
         api_key="ollama",
         **_no_think,
+    )
+    thinking_model = OpenAIServerModel(
+        model_id=_model_id,
+        api_base=os.environ.get("LLAMA_SERVER_URL", "http://localhost:11434/v1"),
+        api_key="ollama",
     )

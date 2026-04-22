@@ -30,8 +30,8 @@ from typing import List, Optional
 
 from app.agent_system.agents.clarification_agent import clarification_agent
 from app.agent_system.agents.iot_action_agent import iot_action_agent
-from app.agent_system.model import model
-from app.agent_system.schemas import DeviceAction, DeviceActionList, UserIntent
+from app.agent_system.model import model, thinking_model
+from app.agent_system.schemas import DeviceAction, DeviceActionList, UserIntent, UserIntentList
 from app.agent_system.tools.buffer_window_tools import check_buffer_window_tool
 from app.agent_system.memory.buffer_window import get_current_buffer
 from app.vectore_store.conversation_memory import load_conversation_context
@@ -58,35 +58,90 @@ if not logger.handlers:
 def _get_intent_system_prompt(session_id: str = None, user_message: str = "") -> str:
     device_summary = get_device_summary()
     buf = get_current_buffer()
-    recent_context = buf.to_context_string(limit=2) if buf else ""
+    recent_context = buf.to_context_string(limit=5) if buf else ""
     conversation_history = load_conversation_context(user_message, session_id=session_id) if session_id else ""
     
     return f"""\
-Extract intent as JSON: {{"room_name": "...", "type_device": "...", "device_name": "..."}}. Use `null` if missing. Maps to "all" if user says "tất cả".
-You MUST output ONLY a valid JSON object. No explanations, no conversation.
+Extract intent as a JSON ARRAY of objects: [{{"room_name": "...", "type_device": "...", "device_name": "..."}}]. Use `null` if missing. Maps to "all" if user says "tất cả" or implicitly refers to multiple rooms/devices.
+If there are multiple devices or rooms, output MULTIPLE objects in the array.
+You MUST output ONLY a valid JSON array. No explanations, no conversation.
 Available devices:
 {device_summary}
 
-Recent Context: {recent_context}
+If the user uses references like "hồi nãy", "thiết bị vừa rồi", "như trên", use the Recent Context and History to fill in the exact device_name and room_name.
+
+Recent Context (last actions): {recent_context}
 History: {conversation_history}
 
 Examples:
-"bật đèn phòng khách" → {{"room_name": "living_room", "type_device": "smart_light_fan", "device_name": "Celling_fan_bedside_night_light"}}
-"tắt quạt" → {{"room_name": null, "type_device": "smart_light_fan", "device_name": null}}
+"bật đèn phòng khách" → [{{"room_name": "living_room", "type_device": "smart_light_fan", "device_name": "Celling_fan_bedside_night_light"}}]
+"vui lòng cho biết quạt ở phòng khách có bật không và bật đèn ngủ ở phòng ngủ" → [{{"room_name": "living_room", "type_device": "smart_light_fan", "device_name": "Celling_fan_bedside_night_light"}}, {{"room_name": "bedroom", "type_device": "smart_night_light", "device_name": "bedroom_night_light_controller"}}]
+"tắt tất cả các thiết bị" → [{{"room_name": "all", "type_device": "all", "device_name": "all"}}]
 """
 
-_RETRIEVER_SYSTEM_PROMPT = """\
-Select matching device(s) and ONLY the requested sensor(s) from YAML. Output JSON ONLY: {"devices": [{"name_device":"<name>","token":"<token>","device_id":"<id>","room":"<room>","type_device":"<type>","sensors":[{"sensor_name":"<sensor>","shared_attributes":{"<k>":<v>}}]}]}
+def _get_retriever_system_prompt() -> str:
+    from app.agent_system.memory.buffer_window import get_current_buffer
+    buf = get_current_buffer()
+    recent_context = buf.to_context_string(limit=20) if buf else "(No recent context)"
+    
+    return f"""\
+Select matching device(s) and ONLY the requested sensor(s) from YAML. You MUST output your answer EXACTLY matching this JSON format:
+```json
+{{
+  "devices": [
+    {{
+      "name_device": "<name>",
+      "token": "<token>",
+      "device_id": "<id>",
+      "room": "<room>",
+      "type_device": "<type>",
+      "sensors": [
+        {{
+          "sensor_name": "<sensor>",
+          "shared_attributes": {{
+            "<k>": <v>
+          }}
+        }}
+      ]
+    }}
+  ]
+}}
+```
 
 Rules:
 1. ONLY include the specific `sensor_name` and `name_key` that match the user's request. DO NOT include all sensors if the user only asked for one.
 2. `shared_attributes` MUST be ONE dict matching `name_key` directly to its value. DO NOT output nested dicts.
 3. If changing state ("bật"/"tắt"/etc): `<v>` must be the primitive actual value (e.g., `true`, `false`, `1`, `0`).
-4. If checking/reading state ("read"/"kiểm tra"/"trạng thái"/etc): EVERY `<v>` MUST BE LITERALLY `null`. NEVER hallucinate a value when reading. (e.g. `"led_celling": null`).
-5. Copy token and device_id EXACTLY from YAML. NEVER invent.
+4. If altering, modifying, or changing state ("đổi"/"change"/etc): `<v>` MUST BE the logical opposite of the CURRENT state (check `Recent Context` for current state), or pick a DIFFERENT valid integer/enum value. DO NOT set to `null` if the user wants to change a value.
+5. If checking/reading state ("read"/"kiểm tra"/"trạng thái"/etc): EVERY `<v>` MUST BE LITERALLY `null`. NEVER hallucinate a value when reading. (e.g. `"led_celling": null`).
+6. Copy token and device_id EXACTLY from YAML. NEVER invent.
+
+Recent Context (Buffer):
+{recent_context}
 
 Example Read Request: "kiểm tra đèn"
-Output: {"devices": [{"name_device": "...", "token": "...", "device_id": "...", "room": "...", "type_device": "...", "sensors": [{"sensor_name": "led_celling", "shared_attributes": {"led_celling": null}}]}]}
+Output:
+```json
+{{
+  "devices": [
+    {{
+      "name_device": "living_room_ceiling_light_fan",
+      "token": "xdF2nW...",
+      "device_id": "fcce...",
+      "room": "living_room",
+      "type_device": "smart_light_fan",
+      "sensors": [
+        {{
+          "sensor_name": "led_celling",
+          "shared_attributes": {{
+            "led_celling": null
+          }}
+        }}
+      ]
+    }}
+  ]
+}}
+```
 """
 
 
@@ -152,7 +207,7 @@ def _extract_intent(
     user_message: str,
     session_id: str,
     history: Optional[list] = None,
-) -> UserIntent:
+) -> UserIntentList:
     """Call the LLM to extract room + device type from the user message.
 
     History (last few turns) is prepended so follow-up messages like
@@ -179,20 +234,31 @@ def _extract_intent(
     try:
         logger.info(f"API CALL: _extract_intent")
         logger.info(f"PROMPT messages for _extract_intent:\n{json.dumps(messages, ensure_ascii=False, indent=2)}")
-        response = model(messages=messages)
+        response = thinking_model(messages=messages)
         logger.info(f"AI RESPONSE: _extract_intent: {response.content}")
         data = _parse_json(response.content)
-        return UserIntent(
-            room_name=data.get("room_name") or None,
-            type_device=data.get("type_device") or None,
-            device_name=data.get("device_name") or None,
-        )
+        
+        if isinstance(data, dict):
+            data = [data]
+            
+        intents = []
+        for item in data:
+            if isinstance(item, dict):
+                intents.append(UserIntent(
+                    room_name=item.get("room_name") or None,
+                    type_device=item.get("type_device") or None,
+                    device_name=item.get("device_name") or None,
+                ))
+        if not intents:
+            intents.append(UserIntent())
+            
+        return UserIntentList(intents=intents)
     except Exception as e:
         logger.warning(f"Intent extraction failed: {str(e)} — returning empty intent")
-        return UserIntent()
+        return UserIntentList(intents=[UserIntent()])
 
 
-def _select_devices(user_message: str, yaml_subset: str, intent: UserIntent = None, session_id: str = None) -> List[DeviceAction]:
+def _select_devices(user_message: str, yaml_subset: str, intent_list: UserIntentList = None, session_id: str = None) -> List[DeviceAction]:
     """Call the LLM to select device(s) from the YAML subset and determine
     what value to set (or None for read).
 
@@ -204,21 +270,22 @@ def _select_devices(user_message: str, yaml_subset: str, intent: UserIntent = No
         return [{"type": "text", "text": text}]
 
     intent_yaml = ""
-    if intent:
-        intent_yaml = (
-            "Extracted Intent (YAML):\n"
-            "rooms:\n"
-            f"  - name: {intent.room_name}\n"
-            "    type_device:\n"
-            f"      - name_type: {intent.type_device}\n"
-            "        devices:\n"
-            f"          - name: {intent.device_name}\n\n"
-        )
+    if intent_list and intent_list.intents:
+        intent_yaml = "Extracted Intent (YAML):\nrooms:\n"
+        for i in intent_list.intents:
+            intent_yaml += f"  - name: {i.room_name}\n"
+            intent_yaml += f"    type_device:\n"
+            intent_yaml += f"      - name_type: {i.type_device}\n"
+            intent_yaml += f"        devices:\n"
+            intent_yaml += f"          - name: {i.device_name}\n"
+        intent_yaml += "\n\n"
+
 
     try:
         logger.info("API CALL: _select_devices")
+        sys_prompt = _get_retriever_system_prompt()
         messages = [
-            {"role": "system", "content": _text(_RETRIEVER_SYSTEM_PROMPT)},
+            {"role": "system", "content": _text(sys_prompt)},
             {
                 "role": "user",
                 "content": _text(
@@ -227,7 +294,7 @@ def _select_devices(user_message: str, yaml_subset: str, intent: UserIntent = No
             },
         ]
         logger.info(f"PROMPT messages for _select_devices:\n{json.dumps(messages, ensure_ascii=False, indent=2)}")
-        response = model(messages=messages)
+        response = thinking_model(messages=messages)
         logger.info(f"AI RESPONSE: _select_devices: {response.content}")
         data = _parse_json(response.content)
 
@@ -268,7 +335,7 @@ def _generate_final_response(user_message: str, result: str, yaml_subset: str = 
             },
         ]
         logger.info(f"PROMPT messages for _generate_final_response:\n{json.dumps(messages, ensure_ascii=False, indent=2)}")
-        response = model(messages=messages)
+        response = thinking_model(messages=messages)
         logger.info(f"AI RESPONSE: _generate_final_response: {response.content}")
         return response.content
     except Exception as e:
@@ -308,57 +375,62 @@ def run_iot_pipeline(
     # Step 1 — Extract intent (Pydantic structured output, no code gen)
     # ------------------------------------------------------------------
     emit("Orchestrator", "Analyzing request...")
-    intent = _extract_intent(user_message, session_id=session_id, history=history)
-    logger.info("Extracted intent: room=%s type=%s", intent.room_name, intent.type_device)
+    intent_list = _extract_intent(user_message, session_id=session_id, history=history)
+    for idx, i in enumerate(intent_list.intents):
+        logger.info("Extracted intent %d: room=%s type=%s", idx+1, i.room_name, i.type_device)
 
     # ------------------------------------------------------------------
-    # Step 2 — Check Buffer Window Memory
+    # Step 2 — Check Buffer Window Memory (applied to the first intent if missing)
     # ------------------------------------------------------------------
     cached = check_buffer_window_tool.forward(user_message)
     if cached != "[]":
         try:
             hit = json.loads(cached)[0]
-            if intent.room_name is None:
-                intent.room_name = hit.get("room")
-            if intent.type_device is None:
-                intent.type_device = hit.get("type_device") or None
-            emit(
-                "Orchestrator",
-                f"Buffer Memory: {hit.get('device_name')} "
-                f"({hit.get('room')})"
-            )
-            logger.debug("Buffer hit: %s", hit)
+            for i in intent_list.intents:
+                if i.room_name is None:
+                    i.room_name = hit.get("room")
+                if i.type_device is None:
+                    i.type_device = hit.get("type_device") or None
+            emit("Orchestrator", f"Buffer Memory applied: {hit.get('device_name')} ({hit.get('room')})")
         except (json.JSONDecodeError, IndexError, KeyError):
             pass
 
     # ------------------------------------------------------------------
     # Step 3 — Clarify if info still missing
     # ------------------------------------------------------------------
-    if intent.room_name is None or intent.type_device is None:
-        emit("Orchestrator", "Need more information...")
-        question = clarification_agent.run(user_message, intent)
-        return f"Clarification_Agent: {str(question)}"
-
-    emit("Orchestrator", f"Room: {intent.room_name} | Device: {intent.type_device}")
+    for i in intent_list.intents:
+        if i.room_name is None or i.type_device is None:
+            emit("Orchestrator", "Need more information...")
+            question = clarification_agent.run(user_message, i)
+            return f"Clarification_Agent: {str(question)}"
+            
+    emit("Orchestrator", f"Handling {len(intent_list.intents)} intents.")
 
     # ------------------------------------------------------------------
     # Step 4 — Iterate YAML → focused subset (deterministic, no LLM)
     # ------------------------------------------------------------------
-    yaml_subset = iterate_smart_home_yaml(
-        room_name=None if intent.room_name == "all" else intent.room_name,
-        type_device=None if intent.type_device == "all" else intent.type_device,
-    )
-    if yaml_subset.strip() == "rooms: []":
-        return (
-            f"Orchestrator: Could not find device '{intent.type_device}' "
-            f"in '{intent.room_name}'."
+    merged_yaml_subset = ""
+    for i in intent_list.intents:
+        subset = iterate_smart_home_yaml(
+            room_name=None if i.room_name == "all" else i.room_name,
+            type_device=None if i.type_device == "all" else i.type_device,
         )
+        # Avoid duplicate yaml inclusions if they overlap
+        if subset not in merged_yaml_subset:
+            merged_yaml_subset += subset + "\n"
+            
+    if not merged_yaml_subset or "rooms: []" in merged_yaml_subset.strip():
+        # It's possible partial overlaps exist, but if it's completely empty:
+        if len(intent_list.intents) == 1:
+            return f"Orchestrator: Could not find device '{intent_list.intents[0].type_device}' in '{intent_list.intents[0].room_name}'."
+        else:
+            return "Orchestrator: Could not find matching devices in configuration."
 
     # ------------------------------------------------------------------
     # Step 5 — Select target device(s) (Pydantic structured output)
     # ------------------------------------------------------------------
     emit("Orchestrator", "Selecting devices...")
-    devices = _select_devices(user_message, yaml_subset, intent, session_id=session_id)
+    devices = _select_devices(user_message, merged_yaml_subset, intent_list, session_id=session_id)
 
     if not devices:
         return "Orchestrator: Could not determine target device."
@@ -376,7 +448,7 @@ def run_iot_pipeline(
     raw_result = iot_action_agent.run(devices_json)
     
     emit("Orchestrator", "Generating response...")
-    final_response = _generate_final_response(user_message, raw_result, yaml_subset)
+    final_response = _generate_final_response(user_message, raw_result, merged_yaml_subset)
     
     # Optional prefixes like "IoT_Action_Agent: " may not be needed anymore
     return final_response

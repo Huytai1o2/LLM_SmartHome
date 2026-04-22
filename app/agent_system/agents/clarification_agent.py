@@ -1,86 +1,70 @@
 """
 Clarification Agent — resolves missing room/device context.
 
-No LLM, no code generation — fully deterministic:
-  1. Check Buffer Window Memory for cached device/room this session.
-  2. If still missing → asks specifically for the missing info (room or device type).
+Leverages thinking_model to logically connect recent Buffer Window Memory
+acts to the current incomplete user message.
 """
 
 from __future__ import annotations
 
 import json
-import re
+import logging
 
+from app.agent_system.model import thinking_model
 from app.agent_system.tools.buffer_window_tools import check_buffer_window_tool
 from app.agent_system.memory.buffer_window import get_current_buffer
-from app.agent_system.tools.yaml_iterator import iterate_smart_home_yaml_tool, list_available_rooms, get_room_and_device_types
+from app.agent_system.tools.yaml_iterator import list_available_rooms, get_room_and_device_types
+
+logger = logging.getLogger("ClarificationAgent")
 
 
 class ClarificationAgent:
-    """Deterministic clarification — no LLM, no code generation."""
+    """Clarification leveraging LLM to infer the missing context from history."""
 
     def run(self, user_message: str, extracted_intent=None) -> str:
-        # Step 1 — Check Buffer Window Memory
-        cached = check_buffer_window_tool.forward(user_message)
-        if cached != "[]":
-            try:
-                hit = json.loads(cached)[0]
-                return (
-                    f"CACHED: device_name={hit.get('device_name')}, "
-                    f"room={hit.get('room')}, token={hit.get('token')}"
-                )
-            except (json.JSONDecodeError, IndexError, KeyError):
-                pass
-                
-        # Use extracted intent directly
+        buf = get_current_buffer()
+        recent_context = buf.to_context_string(limit=5) if buf else "(empty)"
+        
         has_room = False
         device_type = None
         if extracted_intent:
             has_room = bool(extracted_intent.room_name)
             device_type = extracted_intent.type_device
 
-        # If LLM extracted "all"
-        if device_type == "all" and has_room:
-            pass
+        available_rooms = ", ".join(list_available_rooms())
+        
+        room_to_types = get_room_and_device_types()
+        details = []
+        for r, t_list in room_to_types.items():
+            types_str = ", ".join(t_list)
+            details.append(f"{r} ({types_str})")
+        available_devices = "; ".join(details) if details else "unknown"
 
-        # Build suggestions from Buffer Window
-        suggestion_msg = ""
-        buf = get_current_buffer()
-        if buf and buf.all():
-            recent = buf.all()[-1] # the most recent action
-            suggestion_msg = f" Or perhaps you want to control '{recent.device_name}' in '{recent.room}' like before?"
+        prompt = f"""\
+You are a smart home clarification assistant. The user wants to control a device but didn't provide enough information.
+Determine what is missing (room or specific device type) and ask the user a brief clarifying question.
 
-        # Step 2 — Missing Room
-        if not has_room:
-            # We filter rooms that actually have the requested device type
-            room_names = list_available_rooms()
-            if device_type and device_type != "all":
-                # Only offer rooms that actually contain the requested device
-                yaml_result = iterate_smart_home_yaml_tool.forward(
-                    room_name="", type_device=device_type
-                )
-                rooms = re.findall(r"name:\s*(\S+)", yaml_result)
-                # Keep rooms that appear in yaml_result
-                room_names = [r for r in room_names if r in rooms]
-            
-            room_list = ", ".join(room_names) if room_names else "unknown"
-            return f"Which room do you want to control? Available rooms: {room_list}.{suggestion_msg}"
-            
-        # Step 3 - Missing Device
-        if not device_type:
-            # Build a string like: phòng khách (smart_light, smart_fan), phòng bếp (smart_fan)
-            room_to_types = get_room_and_device_types()
-            details = []
-            for r, t_list in room_to_types.items():
-                if has_room and extracted_intent and r != extracted_intent.room_name and r not in (extracted_intent.room_name or []):
-                    continue
-                types_str = ", ".join(t_list)
-                details.append(f"{r} ({types_str})")
-                
-            avail_str = "; ".join(details) if details else "unknown"
-            return f"Which device do you want to control? (Available devices: {avail_str} or 'all devices').{suggestion_msg}"
-            
-        return "Please provide more specific information about the device or room."
+Recent Context (last actions): 
+{recent_context}
 
+Available Rooms: {available_rooms}
+Available Devices per Room: {available_devices}
+
+User's Incomplete Message: "{user_message}"
+Extracted Intent So Far: Room={extracted_intent.room_name if extracted_intent else None}, DeviceType={device_type}
+
+Task: Use the Recent Context and Available info to figure out what they most likely meant.
+If you can infer the missing context from Recent Context (e.g., they said "đổi cái quạt", and the recent context shows they just interacted with a fan in the living room), ask them if they mean that specific one. Otherwise, list the available options for the missing piece.
+Keep the question short, natural, and directly address the user. You can answer in the user's language.
+"""
+        messages = [{"role": "system", "content": [{"type": "text", "text": prompt}]}]
+        
+        try:
+            response = thinking_model(messages=messages)
+            logger.info(f"AI RESPONSE: ClarificationAgent: {response.content}")
+            return response.content
+        except Exception as e:
+            logger.warning(f"Clarification generation failed: {str(e)}")
+            return "Please provide more specific information about the device or room."
 
 clarification_agent = ClarificationAgent()

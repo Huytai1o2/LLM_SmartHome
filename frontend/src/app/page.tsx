@@ -262,7 +262,7 @@ export default function ChatPage() {
               <div className="w-8 h-8 rounded-full bg-gradient-to-r from-purple-400 to-blue-500 flex items-center justify-center text-white font-bold text-xs shadow-sm">
                 US
               </div>
-              <span className="font-medium truncate">User Developer</span>
+              <span className="font-medium truncate">Huytai102</span>
               <Settings className="w-4 h-4 ml-auto text-gray-500" />
             </button>
           </div>
